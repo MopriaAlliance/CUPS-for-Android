@@ -1,18 +1,16 @@
 /*
- * "$Id: cups-private.h 9596 2011-03-11 18:26:36Z mike $"
+ * Private definitions for CUPS.
  *
- *   Private definitions for CUPS.
+ * Copyright 2007-2015 by Apple Inc.
+ * Copyright 1997-2007 by Easy Software Products, all rights reserved.
  *
- *   Copyright 2007-2013 by Apple Inc.
- *   Copyright 1997-2007 by Easy Software Products, all rights reserved.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 #ifndef _CUPS_CUPS_PRIVATE_H_
@@ -24,11 +22,11 @@
 
 #  include "string-private.h"
 #  include "debug-private.h"
+#  include "array-private.h"
 #  include "ipp-private.h"
 #  include "http-private.h"
 #  include "language-private.h"
 #  include "pwg-private.h"
-#  include "ppd-private.h"
 #  include "thread-private.h"
 #  include <cups/cups.h>
 #  ifdef __APPLE__
@@ -86,6 +84,11 @@ typedef struct _cups_globals_s		/**** CUPS global state data ****/
   char			resolved_uri[1024];
 					/* Buffer for cupsBackendDeviceURI */
 
+  /* debug.c */
+#  ifdef DEBUG
+  int			thread_id;	/* Friendly thread ID */
+#  endif /* DEBUG */
+
   /* file.c */
   cups_file_t		*stdio_files[3];/* stdin, stdout, stderr */
 
@@ -116,16 +119,11 @@ typedef struct _cups_globals_s		/**** CUPS global state data ****/
   char			language[32];	/* Cached language */
 #  endif /* __APPLE__ */
 
-  /* ppd.c */
-  ppd_status_t		ppd_status;	/* Status of last ppdOpen*() */
-  int			ppd_line;	/* Current line number */
-  ppd_conform_t		ppd_conform;	/* Level of conformance required */
-
   /* pwg-media.c */
   cups_array_t		*leg_size_lut,	/* Lookup table for legacy names */
 			*ppd_size_lut,	/* Lookup table for PPD names */
 			*pwg_size_lut;	/* Lookup table for PWG names */
-  _pwg_media_t		pwg_media;	/* PWG media data for custom size */
+  pwg_media_t		pwg_media;	/* PWG media data for custom size */
   char			pwg_name[65];	/* PWG media name for custom size */
 
   /* request.c */
@@ -145,6 +143,7 @@ typedef struct _cups_globals_s		/**** CUPS global state data ****/
   /* usersys.c */
   http_encryption_t	encryption;	/* Encryption setting */
   char			user[65],	/* User name */
+			user_agent[256],/* User-Agent string */
 			server[256],	/* Server address */
 			servername[256],/* Server hostname */
 			password[128];	/* Password for default callback */
@@ -159,15 +158,14 @@ typedef struct _cups_globals_s		/**** CUPS global state data ****/
   void			*server_cert_data;
 					/* Server certificate user data */
   int			server_version,	/* Server IPP version */
-			any_root,	/* Allow any root */
+			trust_first,	/* Trust on first use? */
+			any_root,	/* Allow any (e.g., self-signed) root */
 			expired_certs,	/* Allow expired certs */
-			expired_root;	/* Allow expired root */
+			validate_certs;	/* Validate certificates */
 
   /* util.c */
   char			def_printer[256];
 					/* Default printer */
-  char			ppd_filename[HTTP_MAX_URI];
-					/* PPD filename */
 } _cups_globals_t;
 
 typedef struct _cups_media_db_s		/* Media database */
@@ -200,6 +198,7 @@ typedef struct _cups_dconstres_s	/* Constraint/resolver */
 struct _cups_dinfo_s			/* Destination capability and status
 					 * information */
 {
+  int			version;	/* IPP version */
   const char		*uri;		/* Printer URI */
   char			*resource;	/* Resource path */
   ipp_t			*attrs;		/* Printer attributes */
@@ -211,6 +210,11 @@ struct _cups_dinfo_s			/* Destination capability and status
   cups_array_t		*media_db;	/* Media database */
   _cups_media_db_t	min_size,	/* Minimum size */
 			max_size;	/* Maximum size */
+  unsigned		cached_flags;	/* Flags used for cached media */
+  cups_array_t		*cached_db;	/* Cache of media from last index/default */
+  time_t		ready_time;	/* When xxx-ready attributes were last queried */
+  ipp_t			*ready_attrs;	/* xxx-ready attributes */
+  cups_array_t		*ready_db;	/* media[-col]-ready media database */
 };
 
 
@@ -231,6 +235,7 @@ extern char		*_cupsBufferGet(size_t size);
 extern void		_cupsBufferRelease(char *b);
 
 extern http_t		*_cupsConnect(void);
+extern char		*_cupsCreateDest(const char *name, const char *info, const char *device_id, const char *device_uri, char *uri, size_t urisize);
 extern int		_cupsGet1284Values(const char *device_id,
 			                   cups_option_t **values);
 extern const char	*_cupsGetDestResource(cups_dest_t *dest, char *resource,
@@ -266,7 +271,3 @@ extern char		*_cupsUserDefault(char *name, size_t namesize);
 }
 #  endif /* __cplusplus */
 #endif /* !_CUPS_CUPS_PRIVATE_H_ */
-
-/*
- * End of "$Id: cups-private.h 9596 2011-03-11 18:26:36Z mike $".
- */

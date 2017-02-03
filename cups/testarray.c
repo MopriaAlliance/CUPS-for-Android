@@ -1,24 +1,16 @@
 /*
- * "$Id: testarray.c 6649 2007-07-11 21:46:42Z mike $"
+ * Array test program for CUPS.
  *
- *   Array test program for CUPS.
+ * Copyright 2007-2014 by Apple Inc.
+ * Copyright 1997-2006 by Easy Software Products.
  *
- *   Copyright 2007-2010 by Apple Inc.
- *   Copyright 1997-2006 by Easy Software Products.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   main()        - Main entry.
- *   get_seconds() - Get the current time in seconds...
- *   load_words()  - Load words from a file.
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -27,7 +19,7 @@
 
 #include "string-private.h"
 #include "debug-private.h"
-#include "array.h"
+#include "array-private.h"
 #include "dir.h"
 
 
@@ -44,8 +36,7 @@ static int	load_words(const char *filename, cups_array_t *array);
  */
 
 int					/* O - Exit status */
-main(int  argc,				/* I - Number of command-line arguments */
-     char *argv[])			/* I - Command-line arguments */
+main(void)
 {
   int		i;			/* Looping var */
   cups_array_t	*array,			/* Test array */
@@ -139,7 +130,7 @@ main(int  argc,				/* I - Number of command-line arguments */
  /*
   * cupsArrayCount()
   */
- 
+
   fputs("cupsArrayCount: ", stdout);
   if (cupsArrayCount(array) == 4)
     puts("PASS");
@@ -296,7 +287,7 @@ main(int  argc,				/* I - Number of command-line arguments */
   {
     while ((dent = cupsDirRead(dir)) != NULL)
     {
-      i = strlen(dent->filename) - 2;
+      i = (int)strlen(dent->filename) - 2;
 
       if (i > 0 && dent->filename[i] == '.' &&
           (dent->filename[i + 1] == 'c' ||
@@ -319,7 +310,7 @@ main(int  argc,				/* I - Number of command-line arguments */
       * the same buffer in the first place... :)
       */
 
-      strcpy(word, text);
+      strlcpy(word, text, sizeof(word));
 
      /*
       * Grab the next word and compare...
@@ -405,6 +396,88 @@ main(int  argc,				/* I - Number of command-line arguments */
   cupsArrayDelete(dup_array);
 
  /*
+  * Test the array with string functions...
+  */
+
+  fputs("_cupsArrayNewStrings(\" \\t\\nfoo bar\\tboo\\nfar\", ' '): ", stdout);
+  array = _cupsArrayNewStrings(" \t\nfoo bar\tboo\nfar", ' ');
+  if (!array)
+  {
+    status = 1;
+    puts("FAIL (unable to create array)");
+  }
+  else if (cupsArrayCount(array) != 4)
+  {
+    status = 1;
+    printf("FAIL (got %d elements, expected 4)\n", cupsArrayCount(array));
+  }
+  else if (strcmp(text = (char *)cupsArrayFirst(array), "bar"))
+  {
+    status = 1;
+    printf("FAIL (first element \"%s\", expected \"bar\")\n", text);
+  }
+  else if (strcmp(text = (char *)cupsArrayNext(array), "boo"))
+  {
+    status = 1;
+    printf("FAIL (first element \"%s\", expected \"boo\")\n", text);
+  }
+  else if (strcmp(text = (char *)cupsArrayNext(array), "far"))
+  {
+    status = 1;
+    printf("FAIL (first element \"%s\", expected \"far\")\n", text);
+  }
+  else if (strcmp(text = (char *)cupsArrayNext(array), "foo"))
+  {
+    status = 1;
+    printf("FAIL (first element \"%s\", expected \"foo\")\n", text);
+  }
+  else
+    puts("PASS");
+
+  fputs("_cupsArrayAddStrings(array, \"foo2,bar2\", ','): ", stdout);
+  _cupsArrayAddStrings(array, "foo2,bar2", ',');
+
+  if (cupsArrayCount(array) != 6)
+  {
+    status = 1;
+    printf("FAIL (got %d elements, expected 6)\n", cupsArrayCount(array));
+  }
+  else if (strcmp(text = (char *)cupsArrayFirst(array), "bar"))
+  {
+    status = 1;
+    printf("FAIL (first element \"%s\", expected \"bar\")\n", text);
+  }
+  else if (strcmp(text = (char *)cupsArrayNext(array), "bar2"))
+  {
+    status = 1;
+    printf("FAIL (first element \"%s\", expected \"bar2\")\n", text);
+  }
+  else if (strcmp(text = (char *)cupsArrayNext(array), "boo"))
+  {
+    status = 1;
+    printf("FAIL (first element \"%s\", expected \"boo\")\n", text);
+  }
+  else if (strcmp(text = (char *)cupsArrayNext(array), "far"))
+  {
+    status = 1;
+    printf("FAIL (first element \"%s\", expected \"far\")\n", text);
+  }
+  else if (strcmp(text = (char *)cupsArrayNext(array), "foo"))
+  {
+    status = 1;
+    printf("FAIL (first element \"%s\", expected \"foo\")\n", text);
+  }
+  else if (strcmp(text = (char *)cupsArrayNext(array), "foo2"))
+  {
+    status = 1;
+    printf("FAIL (first element \"%s\", expected \"foo2\")\n", text);
+  }
+  else
+    puts("PASS");
+
+  cupsArrayDelete(array);
+
+ /*
   * Summarize the results and return...
   */
 
@@ -473,8 +546,3 @@ load_words(const char   *filename,	/* I - File to load */
 
   return (1);
 }
-
-
-/*
- * End of "$Id: testarray.c 6649 2007-07-11 21:46:42Z mike $".
- */

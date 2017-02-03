@@ -1,29 +1,16 @@
 /*
- * "$Id: options.c 8181 2008-12-10 17:29:57Z mike $"
+ * Option routines for CUPS.
  *
- *   Option routines for CUPS.
+ * Copyright 2007-2014 by Apple Inc.
+ * Copyright 1997-2007 by Easy Software Products.
  *
- *   Copyright 2007-2012 by Apple Inc.
- *   Copyright 1997-2007 by Easy Software Products.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   cupsAddOption()        - Add an option to an option array.
- *   cupsFreeOptions()      - Free all memory used by options.
- *   cupsGetOption()        - Get an option value.
- *   cupsParseOptions()     - Parse options from a command-line argument.
- *   cupsRemoveOption()     - Remove an option from an option array.
- *   _cupsGet1284Values()   - Get 1284 device ID keys and values.
- *   cups_compare_options() - Compare two options.
- *   cups_find_option()     - Find an option using a binary search.
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -60,8 +47,7 @@ cupsAddOption(const char    *name,	/* I  - Name of option */
 		diff;			/* Result of search */
 
 
-  DEBUG_printf(("2cupsAddOption(name=\"%s\", value=\"%s\", num_options=%d, "
-                "options=%p)", name, value, num_options, options));
+  DEBUG_printf(("2cupsAddOption(name=\"%s\", value=\"%s\", num_options=%d, options=%p)", name, value, num_options, (void *)options));
 
   if (!name || !name[0] || !value || !options || num_options < 0)
   {
@@ -99,10 +85,9 @@ cupsAddOption(const char    *name,	/* I  - Name of option */
     if (num_options == 0)
       temp = (cups_option_t *)malloc(sizeof(cups_option_t));
     else
-      temp = (cups_option_t *)realloc(*options, sizeof(cups_option_t) *
-                                        	(num_options + 1));
+      temp = (cups_option_t *)realloc(*options, sizeof(cups_option_t) * (size_t)(num_options + 1));
 
-    if (temp == NULL)
+    if (!temp)
     {
       DEBUG_puts("3cupsAddOption: Unable to expand option array, returning 0");
       return (0);
@@ -114,8 +99,7 @@ cupsAddOption(const char    *name,	/* I  - Name of option */
     {
       DEBUG_printf(("4cupsAddOption: Shifting %d options...",
                     (int)(num_options - insert)));
-      memmove(temp + insert + 1, temp + insert,
-	      (num_options - insert) * sizeof(cups_option_t));
+      memmove(temp + insert + 1, temp + insert, (size_t)(num_options - insert) * sizeof(cups_option_t));
     }
 
     temp        += insert;
@@ -155,8 +139,7 @@ cupsFreeOptions(
   int	i;				/* Looping var */
 
 
-  DEBUG_printf(("cupsFreeOptions(num_options=%d, options=%p)", num_options,
-                options));
+  DEBUG_printf(("cupsFreeOptions(num_options=%d, options=%p)", num_options, (void *)options));
 
   if (num_options <= 0 || !options)
     return;
@@ -184,8 +167,7 @@ cupsGetOption(const char    *name,	/* I - Name of option */
 	match;				/* Matching index */
 
 
-  DEBUG_printf(("2cupsGetOption(name=\"%s\", num_options=%d, options=%p)",
-                name, num_options, options));
+  DEBUG_printf(("2cupsGetOption(name=\"%s\", num_options=%d, options=%p)", name, num_options, (void *)options));
 
   if (!name || num_options <= 0 || !options)
   {
@@ -230,8 +212,7 @@ cupsParseOptions(
 	quote;				/* Quote character */
 
 
-  DEBUG_printf(("cupsParseOptions(arg=\"%s\", num_options=%d, options=%p)",
-                arg, num_options, options));
+  DEBUG_printf(("cupsParseOptions(arg=\"%s\", num_options=%d, options=%p)", arg, num_options, (void *)options));
 
  /*
   * Range check input...
@@ -438,7 +419,7 @@ cupsParseOptions(
 /*
  * 'cupsRemoveOption()' - Remove an option from an option array.
  *
- * @since CUPS 1.2/OS X 10.5@
+ * @since CUPS 1.2/macOS 10.5@
  */
 
 int					/* O  - New number of options */
@@ -451,8 +432,7 @@ cupsRemoveOption(
   cups_option_t	*option;		/* Current option */
 
 
-  DEBUG_printf(("2cupsRemoveOption(name=\"%s\", num_options=%d, options=%p)",
-                name, num_options, options));
+  DEBUG_printf(("2cupsRemoveOption(name=\"%s\", num_options=%d, options=%p)", name, num_options, (void *)options));
 
  /*
   * Range check input...
@@ -487,7 +467,7 @@ cupsRemoveOption(
     _cupsStrFree(option->value);
 
     if (i > 0)
-      memmove(option, option + 1, i * sizeof(cups_option_t));
+      memmove(option, option + 1, (size_t)i * sizeof(cups_option_t));
   }
 
  /*
@@ -613,9 +593,7 @@ cups_find_option(
   cups_option_t	key;			/* Search key */
 
 
-  DEBUG_printf(("7cups_find_option(name=\"%s\", num_options=%d, options=%p, "
-	        "prev=%d, rdiff=%p)", name, num_options, options, prev,
-		rdiff));
+  DEBUG_printf(("7cups_find_option(name=\"%s\", num_options=%d, options=%p, prev=%d, rdiff=%p)", name, num_options, (void *)options, prev, (void *)rdiff));
 
 #ifdef DEBUG
   for (left = 0; left < num_options; left ++)
@@ -704,8 +682,3 @@ cups_find_option(
 
   return (current);
 }
-
-
-/*
- * End of "$Id: options.c 8181 2008-12-10 17:29:57Z mike $".
- */

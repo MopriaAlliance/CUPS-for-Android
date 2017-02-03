@@ -1,21 +1,27 @@
 #
-# "$Id: Makefile 7871 2008-08-27 21:12:43Z mike $"
+# API library Makefile for CUPS.
 #
-#   API library Makefile for CUPS.
+# Copyright 2007-2016 by Apple Inc.
+# Copyright 1997-2006 by Easy Software Products, all rights reserved.
 #
-#   Copyright 2007-2012 by Apple Inc.
-#   Copyright 1997-2006 by Easy Software Products, all rights reserved.
+# These coded instructions, statements, and computer programs are the
+# property of Apple Inc. and are protected by Federal copyright
+# law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+# which should have been included with this file.  If this file is
+# file is missing or damaged, see the license at "http://www.cups.org/".
 #
-#   These coded instructions, statements, and computer programs are the
-#   property of Apple Inc. and are protected by Federal copyright
-#   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
-#   which should have been included with this file.  If this file is
-#   file is missing or damaged, see the license at "http://www.cups.org/".
-#
-#   This file is subject to the Apple OS-Developed Software exception.
+# This file is subject to the Apple OS-Developed Software exception.
 #
 
 include ../Makedefs
+
+
+#
+# Options to build libcups without the use of deprecated APIs...
+#
+
+OPTIONS	=	-D_CUPS_NO_DEPRECATED=1 -D_PPD_DEPRECATED=""
+
 
 #
 # Object files...
@@ -24,25 +30,22 @@ include ../Makedefs
 LIBOBJS	=	\
 		adminutil.o \
 		array.o \
-		attr.o \
 		auth.o \
 		backchannel.o \
 		backend.o \
-		conflicts.o \
-		custom.o \
 		debug.o \
 		dest.o \
 		dest-job.o \
 		dest-localization.o \
 		dest-options.o \
 		dir.o \
-		emit.o \
 		encode.o \
 		file.o \
 		getdevices.o \
 		getifaddrs.o \
 		getputfile.o \
 		globals.o \
+		hash.o \
 		http.o \
 		http-addr.o \
 		http-addrlist.o \
@@ -51,15 +54,20 @@ LIBOBJS	=	\
 		ipp-support.o \
 		langprintf.o \
 		language.o \
-		localize.o \
-		mark.o \
 		md5.o \
 		md5passwd.o \
 		notify.o \
 		options.o \
-		page.o \
 		ppd.o \
+		ppd-attr.o \
 		ppd-cache.o \
+		ppd-conflicts.o \
+		ppd-custom.o \
+		ppd-emit.o \
+		ppd-localize.o \
+		ppd-mark.o \
+		ppd-page.o \
+		ppd-util.o \
 		pwg-media.o \
 		request.o \
 		sidechannel.o \
@@ -68,14 +76,18 @@ LIBOBJS	=	\
 		string.o \
 		tempfile.o \
 		thread.o \
+		tls.o \
 		transcode.o \
 		usersys.o \
 		util.o
 TESTOBJS	= \
 		testadmin.o \
 		testarray.o \
+		testcache.o \
 		testconflicts.o \
+		testcreds.o \
 		testcups.o \
+		testdest.o \
 		testfile.o \
 		testhttp.o \
 		testi18n.o \
@@ -84,7 +96,8 @@ TESTOBJS	= \
 		testlang.o \
 		testppd.o \
 		testpwg.o \
-		testsnmp.o
+		testsnmp.o \
+		tlscheck.o
 OBJS	=	\
 		$(LIBOBJS) \
 		$(TESTOBJS)
@@ -105,6 +118,7 @@ HEADERS	=	\
 		ipp.h \
 		language.h \
 		ppd.h \
+		pwg.h \
 		raster.h \
 		sidechannel.h \
 		transcode.h \
@@ -138,8 +152,11 @@ LIBTARGETS =	\
 UNITTARGETS =	\
 		testadmin \
 		testarray \
+		testcache \
 		testconflicts \
+		testcreds \
 		testcups \
+		testdest \
 		testfile \
 		testhttp \
 		testi18n \
@@ -148,7 +165,8 @@ UNITTARGETS =	\
 		testoptions \
 		testppd \
 		testpwg \
-		testsnmp
+		testsnmp \
+		tlscheck
 
 TARGETS	=	\
 		$(LIBTARGETS)
@@ -181,7 +199,7 @@ unittests:	$(UNITTARGETS)
 
 clean:
 	$(RM) $(OBJS) $(TARGETS) $(UNITTARGETS)
-	$(RM) libcups.so libcups.sl libcups.dylib
+	$(RM) libcups.so libcups.dylib
 
 
 #
@@ -248,7 +266,7 @@ install-libs: $(INSTALLSTATIC)
 	echo Installing libraries in $(LIBDIR)...
 	$(INSTALL_DIR) -m 755 $(LIBDIR)
 	$(INSTALL_LIB) $(LIBCUPS) $(LIBDIR)
-	if test $(LIBCUPS) = "libcups.so.2" -o $(LIBCUPS) = "libcups.sl.2"; then \
+	if test $(LIBCUPS) = "libcups.so.2"; then \
 		$(RM) $(LIBDIR)/`basename $(LIBCUPS) .2`; \
 		$(LN) $(LIBCUPS) $(LIBDIR)/`basename $(LIBCUPS) .2`; \
 	fi
@@ -259,6 +277,7 @@ install-libs: $(INSTALLSTATIC)
 	if test "x$(SYMROOT)" != "x"; then \
 		$(INSTALL_DIR) $(SYMROOT); \
 		cp $(LIBCUPS) $(SYMROOT); \
+		dsymutil $(SYMROOT)/$(LIBCUPS); \
 	fi
 
 installstatic:
@@ -276,9 +295,6 @@ uninstall:
 	$(RM) $(LIBDIR)/libcups.2.dylib
 	$(RM) $(LIBDIR)/$(LIBCUPSSTATIC)
 	$(RM) $(LIBDIR)/libcups.dylib
-	$(RM) $(LIBDIR)/libcups_s.a
-	$(RM) $(LIBDIR)/libcups.sl
-	$(RM) $(LIBDIR)/libcups.sl.2
 	$(RM) $(LIBDIR)/libcups.so
 	$(RM) $(LIBDIR)/libcups.so.2
 	-$(RMDIR) $(LIBDIR)
@@ -289,10 +305,10 @@ uninstall:
 
 
 #
-# libcups.so.2, libcups.sl.2
+# libcups.so.2
 #
 
-libcups.so.2 libcups.sl.2:	$(LIBOBJS)
+libcups.so.2:	$(LIBOBJS)
 	echo Linking $@...
 	$(DSO) $(ARCHFLAGS) $(DSOFLAGS) -o $@ $(LIBOBJS) $(LIBGSSAPI) \
 		$(SSLLIBS) $(DNSSDLIBS) $(COMMONLIBS) $(LIBZ)
@@ -306,13 +322,14 @@ libcups.so.2 libcups.sl.2:	$(LIBOBJS)
 
 libcups.2.dylib:	$(LIBOBJS) $(LIBCUPSORDER)
 	echo Creating export list for $@...
-	nm $(LIBOBJS) 2>/dev/null | grep "T _" | awk '{print $$3}' | \
-		grep -v -e '^(_cupsConnect|_cupsCharset|_cupsEncodingName|_cupsSetDefaults|_cupsSetHTTPError|_cupsUserDefault|_httpWait)$$' | \
+	nm -gm $(LIBOBJS) 2>/dev/null | grep "__text" | grep -v weak | \
+		awk '{print $$NF}' | \
+		grep -v -E -e '^(_cupsConnect|_cupsCharset|_cupsEncodingName|_cupsSetDefaults|_cupsSetHTTPError|_cupsUserDefault)$$' | \
 		sort >t.exp
 	echo Linking $@...
 	$(DSO) $(ARCHFLAGS) $(DSOFLAGS) -o $@ \
 		-install_name $(libdir)/$@ \
-		-current_version 2.10.0 \
+		-current_version 2.12.0 \
 		-compatibility_version 2.0.0 \
 		-exported_symbols_list t.exp \
 		$(LIBOBJS) $(LIBGSSAPI) $(SSLLIBS) $(DNSSDLIBS) \
@@ -322,26 +339,13 @@ libcups.2.dylib:	$(LIBOBJS) $(LIBCUPSORDER)
 
 
 #
-# libcups_s.a
-#
-
-libcups_s.a:	$(LIBOBJS) libcups_s.exp
-	echo Creating $@...
-	$(DSO) $(DSOFLAGS) -Wl,-bexport:libcups_s.exp -o libcups_s.o \
-		$(LIBOBJS) $(LIBGSSAPI) $(SSLLIBS) $(DNSSDLIBS) \
-		$(COMMONLIBS) $(LIBZ)
-	$(RM) $@
-	$(AR) $(ARFLAGS) $@ libcups_s.o
-
-
-#
 # libcups.la
 #
 
 libcups.la:    $(LIBOBJS)
 	echo Linking $@...
 	$(CC) $(ARCHFLAGS) $(DSOFLAGS) -o $@ $(LIBOBJS:.o=.lo) \
-		-rpath $(LIBDIR) -version-info 2:10 $(LIBGSSAPI) $(SSLLIBS) \
+		-rpath $(LIBDIR) -version-info 2:12 $(LIBGSSAPI) $(SSLLIBS) \
 		$(DNSSDLIBS) $(COMMONLIBS) $(LIBZ)
 
 
@@ -354,6 +358,23 @@ libcups.a:	$(LIBOBJS)
 	$(RM) $@
 	$(AR) $(ARFLAGS) $@ $(LIBOBJS)
 	$(RANLIB) $@
+
+
+#
+# libcups2.def (Windows DLL exports file...)
+#
+
+libcups2.def: $(LIBOBJS) Makefile
+	echo Generating $@...
+	echo "LIBRARY libcups2" >libcups2.def
+	echo "VERSION 2.12" >>libcups2.def
+	echo "EXPORTS" >>libcups2.def
+	(nm $(LIBOBJS) 2>/dev/null | grep "T _" | awk '{print $$3}'; \
+	 echo __cups_strcpy; echo __cups_strlcat; echo __cups_strlcpy) | \
+		grep -v -E \
+		    -e 'cups_debug|Apple|BackChannel|Backend|FileCheck|Filter|GSSService|SetNegotiate|SideChannel' \
+		    -e 'Block$$' | \
+		sed -e '1,$$s/^_//' | sort >>libcups2.def
 
 
 #
@@ -379,6 +400,16 @@ testarray:	testarray.o $(LIBCUPSSTATIC)
 
 
 #
+# testcache (dependency on static CUPS library is intentional)
+#
+
+testcache:	testcache.o $(LIBCUPSSTATIC)
+	echo Linking $@...
+	$(CC) $(LDFLAGS) -o $@ testcache.o $(LIBCUPSSTATIC) \
+		$(LIBGSSAPI) $(SSLLIBS) $(DNSSDLIBS) $(COMMONLIBS) $(LIBZ)
+
+
+#
 # testconflicts (dependency on static CUPS library is intentional)
 #
 
@@ -389,12 +420,32 @@ testconflicts:	testconflicts.o $(LIBCUPSSTATIC)
 
 
 #
+# testcreds (dependency on static CUPS library is intentional)
+#
+
+testcreds:	testcreds.o $(LIBCUPSSTATIC)
+	echo Linking $@...
+	$(CC) $(ARCHFLAGS) $(LDFLAGS) -o $@ testcreds.o $(LIBCUPSSTATIC) \
+		$(LIBGSSAPI) $(SSLLIBS) $(DNSSDLIBS) $(COMMONLIBS) $(LIBZ)
+
+
+#
 # testcups (dependency on static CUPS library is intentional)
 #
 
 testcups:	testcups.o $(LIBCUPSSTATIC)
 	echo Linking $@...
 	$(CC) $(LDFLAGS) -o $@ testcups.o $(LIBCUPSSTATIC) \
+		$(LIBGSSAPI) $(SSLLIBS) $(DNSSDLIBS) $(COMMONLIBS) $(LIBZ)
+
+
+#
+# testdest (dependency on static CUPS library is intentional)
+#
+
+testdest:	testdest.o $(LIBCUPSSTATIC)
+	echo Linking $@...
+	$(CC) $(LDFLAGS) -o $@ testdest.o $(LIBCUPSSTATIC) \
 		$(LIBGSSAPI) $(SSLLIBS) $(DNSSDLIBS) $(COMMONLIBS) $(LIBZ)
 
 
@@ -505,6 +556,16 @@ testsnmp:	testsnmp.o $(LIBCUPSSTATIC)
 
 
 #
+# tlscheck (dependency on static CUPS library is intentional)
+#
+
+tlscheck:	tlscheck.o $(LIBCUPSSTATIC)
+	echo Linking $@...
+	$(CC) $(ARCHFLAGS) $(LDFLAGS) -o $@ tlscheck.o $(LIBCUPSSTATIC) \
+		$(LIBGSSAPI) $(SSLLIBS) $(DNSSDLIBS) $(COMMONLIBS) $(LIBZ)
+
+
+#
 # Automatic API help files...
 #
 
@@ -515,6 +576,13 @@ apihelp:
 		--css ../doc/cups-printable.css \
 		--header api-overview.header --intro api-overview.shtml \
 		>../doc/help/api-overview.html
+	mxmldoc --section "Programming" --title "Administration APIs" \
+		--css ../doc/cups-printable.css \
+		--header api-admin.header --intro api-admin.shtml \
+		api-admin.xml \
+		adminutil.c adminutil.h getdevices.c >../doc/help/api-admin.html
+	mxmldoc --tokens help/api-admin.html api-admin.xml >../doc/help/api-admin.tokens
+	$(RM) api-admin.xml
 	mxmldoc --section "Programming" --title "Array API" \
 		--css ../doc/cups-printable.css \
 		--header api-array.header --intro api-array.shtml \
@@ -526,8 +594,8 @@ apihelp:
 		--css ../doc/cups-printable.css \
 		--header api-cups.header --intro api-cups.shtml \
 		api-cups.xml \
-		cups.h adminutil.c dest*.c language.c notify.c \
-		options.c tempfile.c usersys.c \
+		cups.h pwg.h adminutil.c dest*.c language.c notify.c \
+		options.c pwg-media.c tempfile.c usersys.c \
 		util.c >../doc/help/api-cups.html
 	mxmldoc --tokens help/api-cups.html api-cups.xml >../doc/help/api-cups.tokens
 	$(RM) api-cups.xml
@@ -541,9 +609,7 @@ apihelp:
 	mxmldoc --section "Programming" --title "PPD API (DEPRECATED)" \
 		--css ../doc/cups-printable.css \
 		--header api-ppd.header --intro api-ppd.shtml \
-		api-ppd.xml \
-		ppd.h attr.c conflicts.c custom.c emit.c localize.c mark.c page.c \
-		ppd.c >../doc/help/api-ppd.html
+		api-ppd.xml ppd.h ppd-*.c >../doc/help/api-ppd.html
 	mxmldoc --tokens help/api-ppd.html api-ppd.xml >../doc/help/api-ppd.tokens
 	$(RM) api-ppd.xml
 	mxmldoc --section "Programming" --title "HTTP and IPP APIs" \
@@ -565,50 +631,6 @@ apihelp:
 	mxmldoc --tokens help/api-filter.html api-filter.xml >../doc/help/api-filter.tokens
 	$(RM) api-filter.xml
 
-framedhelp:
-	echo Generating CUPS API help files...
-	mxmldoc --framed api-overview \
-		--section "Programming" \
-		--title "Introduction to CUPS Programming" \
-		--css ../doc/cups-printable.css \
-		--header api-overview.header --intro api-overview.shtml
-	mxmldoc --framed api-array \
-		--section "Programming" --title "Array API" \
-		--css ../doc/cups-printable.css \
-		--header api-array.header --intro api-array.shtml \
-		array.h array.c
-	mxmldoc --framed api-cups \
-		--section "Programming" --title "CUPS API" \
-		--css ../doc/cups-printable.css \
-		--header api-cups.header --intro api-cups.shtml \
-		cups.h adminutil.c dest*.c language.c notify.c \
-		options.c tempfile.c usersys.c \
-		util.c
-	mxmldoc --framed api-filedir \
-		--section "Programming" --title "File and Directory APIs" \
-		--css ../doc/cups-printable.css \
-		--header api-filedir.header --intro api-filedir.shtml \
-		file.h file.c dir.h dir.c
-	mxmldoc --framed api-ppd \
-		--section "Programming" --title "PPD API (DEPRECATED)" \
-		--css ../doc/cups-printable.css \
-		--header api-ppd.header --intro api-ppd.shtml \
-		ppd.h attr.c conflicts.c custom.c emit.c localize.c mark.c \
-		page.c ppd.c
-	mxmldoc --framed api-httpipp \
-		--section "Programming" --title "HTTP and IPP APIs" \
-		--css ../doc/cups-printable.css \
-		--header api-httpipp.header --intro api-httpipp.shtml \
-		http.h ipp.h auth.c getdevices.c getputfile.c encode.c \
-		http.c http-addr.c http-support.c ipp.c ipp-support.c \
-		md5passwd.c request.c
-	mxmldoc --framed api-filter \
-		--section "Programming" \
-		--title "Filter and Backend Programming" \
-		--css ../doc/cups-printable.css \
-		--header api-filter.header --intro api-filter.shtml \
-		backchannel.c backend.h backend.c sidechannel.c sidechannel.h
-
 
 #
 # Lines of code computation...
@@ -626,8 +648,4 @@ sloc:
 #
 
 include Dependencies
-
-
-#
-# End of "$Id: Makefile 7871 2008-08-27 21:12:43Z mike $".
-#
+tls.o: tls-darwin.c tls-gnutls.c tls-sspi.c

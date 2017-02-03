@@ -1,24 +1,15 @@
 /*
- * "$Id: debug.c 3643 2012-02-13 16:35:48Z msweet $"
+ * Debugging functions for CUPS.
  *
- *   Debugging functions for CUPS.
+ * Copyright 2008-2015 by Apple Inc.
  *
- *   Copyright 2008-2012 by Apple Inc.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   debug_vsnprintf()    - Format a string into a fixed size buffer.
- *   _cups_debug_printf() - Write a formatted line to the log.
- *   _cups_debug_puts()   - Write a single line to the log.
- *   _cups_debug_set()    - Enable or disable debug logging.
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -68,19 +59,279 @@ int			_cups_debug_level = 1;
 static regex_t		*debug_filter = NULL;
 					/* Filter expression for messages */
 static int		debug_init = 0;	/* Did we initialize debugging? */
-static _cups_mutex_t	debug_mutex = _CUPS_MUTEX_INITIALIZER;
+static _cups_mutex_t	debug_init_mutex = _CUPS_MUTEX_INITIALIZER,
 					/* Mutex to control initialization */
+			debug_log_mutex = _CUPS_MUTEX_INITIALIZER;
+					/* Mutex to serialize log entries */
 
 
 /*
- * 'debug_vsnprintf()' - Format a string into a fixed size buffer.
+ * 'debug_thread_id()' - Return an integer representing the current thread.
  */
 
-static int				/* O - Number of bytes formatted */
-debug_vsnprintf(char       *buffer,	/* O - Output buffer */
-                size_t     bufsize,	/* O - Size of output buffer */
-	        const char *format,	/* I - printf-style format string */
-	        va_list    ap)		/* I - Pointer to additional arguments */
+static int				/* O - Local thread ID */
+debug_thread_id(void)
+{
+  _cups_globals_t *cg = _cupsGlobals();	/* Global data */
+
+
+  return (cg->thread_id);
+}
+
+
+/*
+ * '_cups_debug_printf()' - Write a formatted line to the log.
+ */
+
+void DLLExport
+_cups_debug_printf(const char *format,	/* I - Printf-style format string */
+                   ...)			/* I - Additional arguments as needed */
+{
+  va_list		ap;		/* Pointer to arguments */
+  struct timeval	curtime;	/* Current time */
+  char			buffer[2048];	/* Output buffer */
+  ssize_t		bytes;		/* Number of bytes in buffer */
+  int			level;		/* Log level in message */
+
+
+ /*
+  * See if we need to do any logging...
+  */
+
+  if (!debug_init)
+    _cups_debug_set(getenv("CUPS_DEBUG_LOG"), getenv("CUPS_DEBUG_LEVEL"),
+                    getenv("CUPS_DEBUG_FILTER"), 0);
+
+  if (_cups_debug_fd < 0)
+    return;
+
+ /*
+  * Filter as needed...
+  */
+
+  if (isdigit(format[0]))
+    level = *format++ - '0';
+  else
+    level = 0;
+
+  if (level > _cups_debug_level)
+    return;
+
+  if (debug_filter)
+  {
+    int	result;				/* Filter result */
+
+    _cupsMutexLock(&debug_init_mutex);
+    result = regexec(debug_filter, format, 0, NULL, 0);
+    _cupsMutexUnlock(&debug_init_mutex);
+
+    if (result)
+      return;
+  }
+
+ /*
+  * Format the message...
+  */
+
+  gettimeofday(&curtime, NULL);
+  snprintf(buffer, sizeof(buffer), "T%03d %02d:%02d:%02d.%03d  ",
+           debug_thread_id(), (int)((curtime.tv_sec / 3600) % 24),
+	   (int)((curtime.tv_sec / 60) % 60),
+	   (int)(curtime.tv_sec % 60), (int)(curtime.tv_usec / 1000));
+
+  va_start(ap, format);
+  bytes = _cups_safe_vsnprintf(buffer + 19, sizeof(buffer) - 20, format, ap) + 19;
+  va_end(ap);
+
+  if ((size_t)bytes >= (sizeof(buffer) - 1))
+  {
+    buffer[sizeof(buffer) - 2] = '\n';
+    bytes = sizeof(buffer) - 1;
+  }
+  else if (buffer[bytes - 1] != '\n')
+  {
+    buffer[bytes++] = '\n';
+    buffer[bytes]   = '\0';
+  }
+
+ /*
+  * Write it out...
+  */
+
+  _cupsMutexLock(&debug_log_mutex);
+  write(_cups_debug_fd, buffer, (size_t)bytes);
+  _cupsMutexUnlock(&debug_log_mutex);
+}
+
+
+/*
+ * '_cups_debug_puts()' - Write a single line to the log.
+ */
+
+void DLLExport
+_cups_debug_puts(const char *s)		/* I - String to output */
+{
+  struct timeval	curtime;	/* Current time */
+  char			buffer[2048];	/* Output buffer */
+  ssize_t		bytes;		/* Number of bytes in buffer */
+  int			level;		/* Log level in message */
+
+
+ /*
+  * See if we need to do any logging...
+  */
+
+  if (!debug_init)
+    _cups_debug_set(getenv("CUPS_DEBUG_LOG"), getenv("CUPS_DEBUG_LEVEL"),
+                    getenv("CUPS_DEBUG_FILTER"), 0);
+
+  if (_cups_debug_fd < 0)
+    return;
+
+ /*
+  * Filter as needed...
+  */
+
+  if (isdigit(s[0]))
+    level = *s++ - '0';
+  else
+    level = 0;
+
+  if (level > _cups_debug_level)
+    return;
+
+  if (debug_filter)
+  {
+    int	result;				/* Filter result */
+
+    _cupsMutexLock(&debug_init_mutex);
+    result = regexec(debug_filter, s, 0, NULL, 0);
+    _cupsMutexUnlock(&debug_init_mutex);
+
+    if (result)
+      return;
+  }
+
+ /*
+  * Format the message...
+  */
+
+  gettimeofday(&curtime, NULL);
+  bytes = snprintf(buffer, sizeof(buffer), "T%03d %02d:%02d:%02d.%03d  %s",
+                   debug_thread_id(), (int)((curtime.tv_sec / 3600) % 24),
+		   (int)((curtime.tv_sec / 60) % 60),
+		   (int)(curtime.tv_sec % 60), (int)(curtime.tv_usec / 1000),
+		   s);
+
+  if ((size_t)bytes >= (sizeof(buffer) - 1))
+  {
+    buffer[sizeof(buffer) - 2] = '\n';
+    bytes = sizeof(buffer) - 1;
+  }
+  else if (buffer[bytes - 1] != '\n')
+  {
+    buffer[bytes++] = '\n';
+    buffer[bytes]   = '\0';
+  }
+
+ /*
+  * Write it out...
+  */
+
+  _cupsMutexLock(&debug_log_mutex);
+  write(_cups_debug_fd, buffer, (size_t)bytes);
+  _cupsMutexUnlock(&debug_log_mutex);
+}
+
+
+/*
+ * '_cups_debug_set()' - Enable or disable debug logging.
+ */
+
+void DLLExport
+_cups_debug_set(const char *logfile,	/* I - Log file or NULL */
+                const char *level,	/* I - Log level or NULL */
+		const char *filter,	/* I - Filter string or NULL */
+		int        force)	/* I - Force initialization */
+{
+  _cupsMutexLock(&debug_init_mutex);
+
+  if (!debug_init || force)
+  {
+   /*
+    * Restore debug settings to defaults...
+    */
+
+    if (_cups_debug_fd != -1)
+    {
+      close(_cups_debug_fd);
+      _cups_debug_fd = -1;
+    }
+
+    if (debug_filter)
+    {
+      regfree((regex_t *)debug_filter);
+      debug_filter = NULL;
+    }
+
+    _cups_debug_level = 1;
+
+   /*
+    * Open logs, set log levels, etc.
+    */
+
+    if (!logfile)
+      _cups_debug_fd = -1;
+    else if (!strcmp(logfile, "-"))
+      _cups_debug_fd = 2;
+    else
+    {
+      char	buffer[1024];		/* Filename buffer */
+
+      snprintf(buffer, sizeof(buffer), logfile, getpid());
+
+      if (buffer[0] == '+')
+	_cups_debug_fd = open(buffer + 1, O_WRONLY | O_APPEND | O_CREAT, 0644);
+      else
+	_cups_debug_fd = open(buffer, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+    }
+
+    if (level)
+      _cups_debug_level = atoi(level);
+
+    if (filter)
+    {
+      if ((debug_filter = (regex_t *)calloc(1, sizeof(regex_t))) == NULL)
+	fputs("Unable to allocate memory for CUPS_DEBUG_FILTER - results not "
+	      "filtered!\n", stderr);
+      else if (regcomp(debug_filter, filter, REG_EXTENDED))
+      {
+	fputs("Bad regular expression in CUPS_DEBUG_FILTER - results not "
+	      "filtered!\n", stderr);
+	free(debug_filter);
+	debug_filter = NULL;
+      }
+    }
+
+    debug_init = 1;
+  }
+
+  _cupsMutexUnlock(&debug_init_mutex);
+}
+#endif /* DEBUG */
+
+
+/*
+ * '_cups_safe_vsnprintf()' - Format a string into a fixed size buffer,
+ *                            quoting special characters.
+ */
+
+ssize_t					/* O - Number of bytes formatted */
+_cups_safe_vsnprintf(
+    char       *buffer,			/* O - Output buffer */
+    size_t     bufsize,			/* O - Size of output buffer */
+    const char *format,			/* I - printf-style format string */
+    va_list    ap)			/* I - Pointer to additional arguments */
 {
   char		*bufptr,		/* Pointer to position in buffer */
 		*bufend,		/* Pointer to end of buffer */
@@ -88,11 +339,11 @@ debug_vsnprintf(char       *buffer,	/* O - Output buffer */
 		type;			/* Format type character */
   int		width,			/* Width of field */
 		prec;			/* Number of characters of precision */
-  char		tformat[100],		/* Temporary format string for sprintf() */
+  char		tformat[100],		/* Temporary format string for snprintf() */
 		*tptr,			/* Pointer into temporary format */
 		temp[1024];		/* Buffer for formatted numbers */
   char		*s;			/* Pointer to string */
-  int		bytes;			/* Total number of bytes needed */
+  ssize_t	bytes;			/* Total number of bytes needed */
 
 
   if (!buffer || bufsize < 2 || !format)
@@ -133,7 +384,7 @@ debug_vsnprintf(char       *buffer,	/* O - Output buffer */
 	format ++;
 	width = va_arg(ap, int);
 
-	snprintf(tptr, sizeof(tformat) - (tptr - tformat), "%d", width);
+	snprintf(tptr, sizeof(tformat) - (size_t)(tptr - tformat), "%d", width);
 	tptr += strlen(tptr);
       }
       else
@@ -165,7 +416,7 @@ debug_vsnprintf(char       *buffer,	/* O - Output buffer */
 	  format ++;
 	  prec = va_arg(ap, int);
 
-	  snprintf(tptr, sizeof(tformat) - (tptr - tformat), "%d", prec);
+	  snprintf(tptr, sizeof(tformat) - (size_t)(tptr - tformat), "%d", prec);
 	  tptr += strlen(tptr);
 	}
 	else
@@ -220,25 +471,17 @@ debug_vsnprintf(char       *buffer,	/* O - Output buffer */
 	case 'e' :
 	case 'f' :
 	case 'g' :
-	    if ((width + 2) > sizeof(temp))
+	    if ((size_t)(width + 2) > sizeof(temp))
 	      break;
 
-	    sprintf(temp, tformat, va_arg(ap, double));
+	    snprintf(temp, sizeof(temp), tformat, va_arg(ap, double));
 
             bytes += (int)strlen(temp);
 
             if (bufptr)
 	    {
-	      if ((bufptr + strlen(temp)) > bufend)
-	      {
-		strncpy(bufptr, temp, (size_t)(bufend - bufptr));
-		bufptr = bufend;
-	      }
-	      else
-	      {
-		strcpy(bufptr, temp);
-		bufptr += strlen(temp);
-	      }
+	      strlcpy(bufptr, temp, (size_t)(bufend - bufptr));
+	      bufptr += strlen(bufptr);
 	    }
 	    break;
 
@@ -250,56 +493,40 @@ debug_vsnprintf(char       *buffer,	/* O - Output buffer */
 	case 'o' :
 	case 'u' :
 	case 'x' :
-	    if ((width + 2) > sizeof(temp))
+	    if ((size_t)(width + 2) > sizeof(temp))
 	      break;
 
 #  ifdef HAVE_LONG_LONG
             if (size == 'L')
-	      sprintf(temp, tformat, va_arg(ap, long long));
+	      snprintf(temp, sizeof(temp), tformat, va_arg(ap, long long));
 	    else
 #  endif /* HAVE_LONG_LONG */
             if (size == 'l')
-	      sprintf(temp, tformat, va_arg(ap, long));
+	      snprintf(temp, sizeof(temp), tformat, va_arg(ap, long));
 	    else
-	      sprintf(temp, tformat, va_arg(ap, int));
+	      snprintf(temp, sizeof(temp), tformat, va_arg(ap, int));
 
             bytes += (int)strlen(temp);
 
 	    if (bufptr)
 	    {
-	      if ((bufptr + strlen(temp)) > bufend)
-	      {
-		strncpy(bufptr, temp, (size_t)(bufend - bufptr));
-		bufptr = bufend;
-	      }
-	      else
-	      {
-		strcpy(bufptr, temp);
-		bufptr += strlen(temp);
-	      }
+	      strlcpy(bufptr, temp, (size_t)(bufend - bufptr));
+	      bufptr += strlen(bufptr);
 	    }
 	    break;
 
 	case 'p' : /* Pointer value */
-	    if ((width + 2) > sizeof(temp))
+	    if ((size_t)(width + 2) > sizeof(temp))
 	      break;
 
-	    sprintf(temp, tformat, va_arg(ap, void *));
+	    snprintf(temp, sizeof(temp), tformat, va_arg(ap, void *));
 
             bytes += (int)strlen(temp);
 
 	    if (bufptr)
 	    {
-	      if ((bufptr + strlen(temp)) > bufend)
-	      {
-		strncpy(bufptr, temp, (size_t)(bufend - bufptr));
-		bufptr = bufend;
-	      }
-	      else
-	      {
-		strcpy(bufptr, temp);
-		bufptr += strlen(temp);
-	      }
+	      strlcpy(bufptr, temp, (size_t)(bufend - bufptr));
+	      bufptr += strlen(bufptr);
 	    }
 	    break;
 
@@ -309,7 +536,7 @@ debug_vsnprintf(char       *buffer,	/* O - Output buffer */
 	    if (bufptr)
 	    {
 	      if (width <= 1)
-	        *bufptr++ = va_arg(ap, int);
+	        *bufptr++ = (char)va_arg(ap, int);
 	      else
 	      {
 		if ((bufptr + width) > bufend)
@@ -390,7 +617,7 @@ debug_vsnprintf(char       *buffer,	/* O - Output buffer */
 	    break;
 
 	case 'n' : /* Output number of chars so far */
-	    *(va_arg(ap, int *)) = bytes;
+	    *(va_arg(ap, int *)) = (int)bytes;
 	    break;
       }
     }
@@ -413,246 +640,3 @@ debug_vsnprintf(char       *buffer,	/* O - Output buffer */
 
   return (bytes);
 }
-
-
-/*
- * '_cups_debug_printf()' - Write a formatted line to the log.
- */
-
-void DLLExport
-_cups_debug_printf(const char *format,	/* I - Printf-style format string */
-                   ...)			/* I - Additional arguments as needed */
-{
-  va_list		ap;		/* Pointer to arguments */
-  struct timeval	curtime;	/* Current time */
-  char			buffer[2048];	/* Output buffer */
-  size_t		bytes;		/* Number of bytes in buffer */
-  int			level;		/* Log level in message */
-
-
- /*
-  * See if we need to do any logging...
-  */
-
-  if (!debug_init)
-    _cups_debug_set(getenv("CUPS_DEBUG_LOG"), getenv("CUPS_DEBUG_LEVEL"),
-                    getenv("CUPS_DEBUG_FILTER"), 0);
-
-  if (_cups_debug_fd < 0)
-    return;
-
- /*
-  * Filter as needed...
-  */
-
-  if (isdigit(format[0]))
-    level = *format++ - '0';
-  else
-    level = 0;
-
-  if (level > _cups_debug_level)
-    return;
-
-  if (debug_filter)
-  {
-    int	result;				/* Filter result */
-
-    _cupsMutexLock(&debug_mutex);
-    result = regexec(debug_filter, format, 0, NULL, 0);
-    _cupsMutexUnlock(&debug_mutex);
-
-    if (result)
-      return;
-  }
-
- /*
-  * Format the message...
-  */
-
-  gettimeofday(&curtime, NULL);
-  snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d.%03d ",
-	   (int)((curtime.tv_sec / 3600) % 24),
-	   (int)((curtime.tv_sec / 60) % 60),
-	   (int)(curtime.tv_sec % 60), (int)(curtime.tv_usec / 1000));
-
-  va_start(ap, format);
-  bytes = debug_vsnprintf(buffer + 13, sizeof(buffer) - 14, format, ap) + 13;
-  va_end(ap);
-
-  if (bytes >= (sizeof(buffer) - 1))
-  {
-    buffer[sizeof(buffer) - 2] = '\n';
-    bytes = sizeof(buffer) - 1;
-  }
-  else if (buffer[bytes - 1] != '\n')
-  {
-    buffer[bytes++] = '\n';
-    buffer[bytes]   = '\0';
-  }
-
- /*
-  * Write it out...
-  */
-
-  write(_cups_debug_fd, buffer, bytes);
-}
-
-
-/*
- * '_cups_debug_puts()' - Write a single line to the log.
- */
-
-void DLLExport
-_cups_debug_puts(const char *s)		/* I - String to output */
-{
-  struct timeval	curtime;	/* Current time */
-  char			buffer[2048];	/* Output buffer */
-  size_t		bytes;		/* Number of bytes in buffer */
-  int			level;		/* Log level in message */
-
-
- /*
-  * See if we need to do any logging...
-  */
-
-  if (!debug_init)
-    _cups_debug_set(getenv("CUPS_DEBUG_LOG"), getenv("CUPS_DEBUG_LEVEL"),
-                    getenv("CUPS_DEBUG_FILTER"), 0);
-
-  if (_cups_debug_fd < 0)
-    return;
-
- /*
-  * Filter as needed...
-  */
-
-  if (isdigit(s[0]))
-    level = *s++ - '0';
-  else
-    level = 0;
-
-  if (level > _cups_debug_level)
-    return;
-
-  if (debug_filter)
-  {
-    int	result;				/* Filter result */
-
-    _cupsMutexLock(&debug_mutex);
-    result = regexec(debug_filter, s, 0, NULL, 0);
-    _cupsMutexUnlock(&debug_mutex);
-
-    if (result)
-      return;
-  }
-
- /*
-  * Format the message...
-  */
-
-  gettimeofday(&curtime, NULL);
-  bytes = snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d.%03d %s",
-		   (int)((curtime.tv_sec / 3600) % 24),
-		   (int)((curtime.tv_sec / 60) % 60),
-		   (int)(curtime.tv_sec % 60), (int)(curtime.tv_usec / 1000),
-		   s);
-
-  if (bytes >= (sizeof(buffer) - 1))
-  {
-    buffer[sizeof(buffer) - 2] = '\n';
-    bytes = sizeof(buffer) - 1;
-  }
-  else if (buffer[bytes - 1] != '\n')
-  {
-    buffer[bytes++] = '\n';
-    buffer[bytes]   = '\0';
-  }
-
- /*
-  * Write it out...
-  */
-
-  write(_cups_debug_fd, buffer, bytes);
-}
-
-
-/*
- * '_cups_debug_set()' - Enable or disable debug logging.
- */
-
-void DLLExport
-_cups_debug_set(const char *logfile,	/* I - Log file or NULL */
-                const char *level,	/* I - Log level or NULL */
-		const char *filter,	/* I - Filter string or NULL */
-		int        force)	/* I - Force initialization */
-{
-  _cupsMutexLock(&debug_mutex);
-
-  if (!debug_init || force)
-  {
-   /*
-    * Restore debug settings to defaults...
-    */
-
-    if (_cups_debug_fd != -1)
-    {
-      close(_cups_debug_fd);
-      _cups_debug_fd = -1;
-    }
-
-    if (debug_filter)
-    {
-      regfree((regex_t *)debug_filter);
-      debug_filter = NULL;
-    }
-
-    _cups_debug_level = 1;
-
-   /*
-    * Open logs, set log levels, etc.
-    */
-
-    if (!logfile)
-      _cups_debug_fd = -1;
-    else if (!strcmp(logfile, "-"))
-      _cups_debug_fd = 2;
-    else
-    {
-      char	buffer[1024];		/* Filename buffer */
-
-      snprintf(buffer, sizeof(buffer), logfile, getpid());
-
-      if (buffer[0] == '+')
-	_cups_debug_fd = open(buffer + 1, O_WRONLY | O_APPEND | O_CREAT, 0644);
-      else
-	_cups_debug_fd = open(buffer, O_WRONLY | O_TRUNC | O_CREAT, 0644);
-    }
-
-    if (level)
-      _cups_debug_level = atoi(level);
-
-    if (filter)
-    {
-      if ((debug_filter = (regex_t *)calloc(1, sizeof(regex_t))) == NULL)
-	fputs("Unable to allocate memory for CUPS_DEBUG_FILTER - results not "
-	      "filtered!\n", stderr);
-      else if (regcomp(debug_filter, filter, REG_EXTENDED))
-      {
-	fputs("Bad regular expression in CUPS_DEBUG_FILTER - results not "
-	      "filtered!\n", stderr);
-	free(debug_filter);
-	debug_filter = NULL;
-      }
-    }
-
-    debug_init = 1;
-  }
-
-  _cupsMutexUnlock(&debug_mutex);
-}
-#endif /* DEBUG */
-
-
-/*
- * End of "$Id: debug.c 3643 2012-02-13 16:35:48Z msweet $".
- */

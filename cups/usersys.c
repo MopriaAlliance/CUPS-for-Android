@@ -1,39 +1,16 @@
 /*
- * "$Id: usersys.c 8498 2009-04-13 17:03:15Z mike $"
+ * User, system, and password routines for CUPS.
  *
- *   User, system, and password routines for CUPS.
+ * Copyright 2007-2015 by Apple Inc.
+ * Copyright 1997-2006 by Easy Software Products.
  *
- *   Copyright 2007-2013 by Apple Inc.
- *   Copyright 1997-2006 by Easy Software Products.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   cupsEncryption()        - Get the current encryption settings.
- *   cupsGetPassword()       - Get a password from the user.
- *   cupsGetPassword2()      - Get a password from the user using the advanced
- *                             password callback.
- *   cupsServer()            - Return the hostname/address of the current
- *                             server.
- *   cupsSetClientCertCB()   - Set the client certificate callback.
- *   cupsSetEncryption()     - Set the encryption preference.
- *   cupsSetPasswordCB()     - Set the password callback for CUPS.
- *   cupsSetPasswordCB2()    - Set the advanced password callback for CUPS.
- *   cupsSetServer()         - Set the default server name and port.
- *   cupsSetServerCertCB()   - Set the server certificate callback.
- *   cupsSetUser()           - Set the default user name.
- *   cupsUser()              - Return the current user's name.
- *   _cupsGetPassword()      - Get a password from the user.
- *   _cupsGSSServiceName()   - Get the GSS (Kerberos) service name.
- *   _cupsSetDefaults()      - Set the default server, port, and encryption.
- *   cups_read_client_conf() - Read a client.conf file.
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -48,6 +25,7 @@
 #else
 #  include <pwd.h>
 #  include <termios.h>
+#  include <sys/utsname.h>
 #endif /* WIN32 */
 
 
@@ -55,24 +33,66 @@
  * Local constants...
  */
 
+#ifdef __APPLE__
+#  define kCUPSPrintingPrefs	CFSTR("org.cups.PrintingPrefs")
+#  define kAllowAnyRootKey	CFSTR("AllowAnyRoot")
+#  define kAllowExpiredCertsKey	CFSTR("AllowExpiredCerts")
+#  define kEncryptionKey	CFSTR("Encryption")
+#  define kGSSServiceNameKey	CFSTR("GSSServiceName")
+#  define kSSLOptionsKey	CFSTR("SSLOptions")
+#  define kTrustOnFirstUseKey	CFSTR("TrustOnFirstUse")
+#  define kValidateCertsKey	CFSTR("ValidateCerts")
+#endif /* __APPLE__ */
+
 #define _CUPS_PASSCHAR	'*'		/* Character that is echoed for password */
+
+
+/*
+ * Local types...
+ */
+
+typedef struct _cups_client_conf_s	/**** client.conf config data ****/
+{
+#ifdef HAVE_SSL
+  int			ssl_options;	/* SSLOptions values */
+#endif /* HAVE_SSL */
+  int			trust_first,	/* Trust on first use? */
+			any_root,	/* Allow any (e.g., self-signed) root */
+			expired_certs,	/* Allow expired certs */
+			validate_certs;	/* Validate certificates */
+  http_encryption_t	encryption;	/* Encryption setting */
+  char			user[65],	/* User name */
+			server_name[256];
+					/* Server hostname */
+#ifdef HAVE_GSSAPI
+  char			gss_service_name[32];
+  					/* Kerberos service name */
+#endif /* HAVE_GSSAPI */
+} _cups_client_conf_t;
 
 
 /*
  * Local functions...
  */
 
-static void	cups_read_client_conf(cups_file_t *fp,
-		                      _cups_globals_t *cg,
-		                      const char *cups_encryption,
-				      const char *cups_server,
-				      const char *cups_user,
+#ifdef __APPLE__
+static int	cups_apple_get_boolean(CFStringRef key, int *value);
+static int	cups_apple_get_string(CFStringRef key, char *value, size_t valsize);
+#endif /* __APPLE__ */
+static int	cups_boolean_value(const char *value);
+static void	cups_finalize_client_conf(_cups_client_conf_t *cc);
+static void	cups_init_client_conf(_cups_client_conf_t *cc);
+static void	cups_read_client_conf(cups_file_t *fp, _cups_client_conf_t *cc);
+static void	cups_set_default_ipp_port(_cups_globals_t *cg);
+static void	cups_set_encryption(_cups_client_conf_t *cc, const char *value);
 #ifdef HAVE_GSSAPI
-                                      const char *cups_gssservicename,
+static void	cups_set_gss_service_name(_cups_client_conf_t *cc, const char *value);
 #endif /* HAVE_GSSAPI */
-				      const char *cups_anyroot,
-				      const char *cups_expiredroot,
-				      const char *cups_expiredcerts);
+static void	cups_set_server_name(_cups_client_conf_t *cc, const char *value);
+#ifdef HAVE_SSL
+static void	cups_set_ssl_options(_cups_client_conf_t *cc, const char *value);
+#endif /* HAVE_SSL */
+static void	cups_set_user(_cups_client_conf_t *cc, const char *value);
 
 
 /*
@@ -81,7 +101,7 @@ static void	cups_read_client_conf(cups_file_t *fp,
  * The default encryption setting comes from the CUPS_ENCRYPTION
  * environment variable, then the ~/.cups/client.conf file, and finally the
  * /etc/cups/client.conf file. If not set, the default is
- * @code HTTP_ENCRYPT_IF_REQUESTED@.
+ * @code HTTP_ENCRYPTION_IF_REQUESTED@.
  *
  * Note: The current encryption setting is tracked separately for each thread
  * in a program. Multi-threaded programs that override the setting via the
@@ -136,7 +156,7 @@ cupsGetPassword(const char *prompt)	/* I - Prompt string */
  * the @link cupsSetPasswordCB@ or @link cupsSetPasswordCB2@ functions need to
  * do so in each thread for the same function to be used.
  *
- * @since CUPS 1.4/OS X 10.6@
+ * @since CUPS 1.4/macOS 10.6@
  */
 
 const char *				/* O - Password */
@@ -194,7 +214,7 @@ cupsServer(void)
  * in a program. Multi-threaded programs that override the callback need to do
  * so in each thread for the same callback to be used.
  *
- * @since CUPS 1.5/OS X 10.7@
+ * @since CUPS 1.5/macOS 10.7@
  */
 
 void
@@ -218,7 +238,7 @@ cupsSetClientCertCB(
  * program. Multi-threaded programs that override the setting need to do so in
  * each thread for the same setting to be used.
  *
- * @since CUPS 1.5/OS X 10.7@
+ * @since CUPS 1.5/macOS 10.7@
  */
 
 int					/* O - Status of call (0 = success) */
@@ -231,8 +251,10 @@ cupsSetCredentials(
   if (cupsArrayCount(credentials) < 1)
     return (-1);
 
+#ifdef HAVE_SSL
   _httpFreeCredentials(cg->tls_credentials);
   cg->tls_credentials = _httpCreateCredentials(credentials);
+#endif /* HAVE_SSL */
 
   return (cg->tls_credentials ? 0 : -1);
 }
@@ -244,7 +266,7 @@ cupsSetCredentials(
  * The default encryption setting comes from the CUPS_ENCRYPTION
  * environment variable, then the ~/.cups/client.conf file, and finally the
  * /etc/cups/client.conf file. If not set, the default is
- * @code HTTP_ENCRYPT_IF_REQUESTED@.
+ * @code HTTP_ENCRYPTION_IF_REQUESTED@.
  *
  * Note: The current encryption setting is tracked separately for each thread
  * in a program. Multi-threaded programs that override the setting need to do
@@ -304,7 +326,7 @@ cupsSetPasswordCB(cups_password_cb_t cb)/* I - Callback function */
  * in a program. Multi-threaded programs that override the callback need to do
  * so in each thread for the same callback to be used.
  *
- * @since CUPS 1.4/OS X 10.6@
+ * @since CUPS 1.4/macOS 10.6@
  */
 
 void
@@ -376,8 +398,11 @@ cupsSetServer(const char *server)	/* I - Server name */
       cg->ipp_port = atoi(port);
     }
 
+    if (!cg->ipp_port)
+      cups_set_default_ipp_port(cg);
+
     if (cg->server[0] == '/')
-      strcpy(cg->servername, "localhost");
+      strlcpy(cg->servername, "localhost", sizeof(cg->servername));
     else
       strlcpy(cg->servername, cg->server, sizeof(cg->servername));
   }
@@ -386,6 +411,7 @@ cupsSetServer(const char *server)	/* I - Server name */
     cg->server[0]      = '\0';
     cg->servername[0]  = '\0';
     cg->server_version = 20;
+    cg->ipp_port       = 0;
   }
 
   if (cg->http)
@@ -405,7 +431,7 @@ cupsSetServer(const char *server)	/* I - Server name */
  * in a program. Multi-threaded programs that override the callback need to do
  * so in each thread for the same callback to be used.
  *
- * @since CUPS 1.5/OS X 10.7@
+ * @since CUPS 1.5/macOS 10.7@
  */
 
 void
@@ -445,6 +471,62 @@ cupsSetUser(const char *user)		/* I - User name */
 
 
 /*
+ * 'cupsSetUserAgent()' - Set the default HTTP User-Agent string.
+ *
+ * Setting the string to NULL forces the default value containing the CUPS
+ * version, IPP version, and operating system version and architecture.
+ *
+ * @since CUPS 1.7/macOS 10.9@
+ */
+
+void
+cupsSetUserAgent(const char *user_agent)/* I - User-Agent string or @code NULL@ */
+{
+  _cups_globals_t	*cg = _cupsGlobals();
+					/* Thread globals */
+#ifdef WIN32
+  SYSTEM_INFO		sysinfo;	/* System information */
+  OSVERSIONINFO		version;	/* OS version info */
+#else
+  struct utsname	name;		/* uname info */
+#endif /* WIN32 */
+
+
+  if (user_agent)
+  {
+    strlcpy(cg->user_agent, user_agent, sizeof(cg->user_agent));
+    return;
+  }
+
+#ifdef WIN32
+  version.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
+  GetVersionEx(&version);
+  GetNativeSystemInfo(&sysinfo);
+
+  snprintf(cg->user_agent, sizeof(cg->user_agent),
+           CUPS_MINIMAL " (Windows %d.%d; %s) IPP/2.0",
+	   version.dwMajorVersion, version.dwMinorVersion,
+	   sysinfo.wProcessorArchitecture
+	       == PROCESSOR_ARCHITECTURE_AMD64 ? "amd64" :
+	       sysinfo.wProcessorArchitecture
+		   == PROCESSOR_ARCHITECTURE_ARM ? "arm" :
+	       sysinfo.wProcessorArchitecture
+		   == PROCESSOR_ARCHITECTURE_IA64 ? "ia64" :
+	       sysinfo.wProcessorArchitecture
+		   == PROCESSOR_ARCHITECTURE_INTEL ? "intel" :
+	       "unknown");
+
+#else
+  uname(&name);
+
+  snprintf(cg->user_agent, sizeof(cg->user_agent),
+           CUPS_MINIMAL " (%s %s; %s) IPP/2.0",
+	   name.sysname, name.release, name.machine);
+#endif /* WIN32 */
+}
+
+
+/*
  * 'cupsUser()' - Return the current user's name.
  *
  * Note: The current user name is tracked separately for each thread in a
@@ -463,6 +545,25 @@ cupsUser(void)
     _cupsSetDefaults();
 
   return (cg->user);
+}
+
+
+/*
+ * 'cupsUserAgent()' - Return the default HTTP User-Agent string.
+ *
+ * @since CUPS 1.7/macOS 10.9@
+ */
+
+const char *				/* O - User-Agent string */
+cupsUserAgent(void)
+{
+  _cups_globals_t *cg = _cupsGlobals();	/* Thread globals */
+
+
+  if (!cg->user_agent[0])
+    cupsSetUserAgent(NULL);
+
+  return (cg->user_agent);
 }
 
 
@@ -623,7 +724,9 @@ _cupsGetPassword(const char *prompt)	/* I - Prompt string */
   }
 
   noecho = original;
-  noecho.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+  noecho.c_lflag &= (tcflag_t)~(ICANON | ECHO | ECHOE | ISIG);
+  noecho.c_cc[VMIN]  = 1;
+  noecho.c_cc[VTIME] = 0;
 
   if (tcsetattr(tty, TCSAFLUSH, &noecho))
   {
@@ -648,7 +751,10 @@ _cupsGetPassword(const char *prompt)	/* I - Prompt string */
 
   while ((passbytes = read(tty, &passch, 1)) == 1)
   {
-    if (passch == noecho.c_cc[VEOL] || passch == noecho.c_cc[VEOL2] ||
+    if (passch == noecho.c_cc[VEOL] ||
+#  ifdef VEOL2
+        passch == noecho.c_cc[VEOL2] ||
+#  endif /* VEOL2 */
         passch == 0x0A || passch == 0x0D)
     {
      /*
@@ -765,82 +871,328 @@ void
 _cupsSetDefaults(void)
 {
   cups_file_t	*fp;			/* File */
-  const char	*home,			/* Home directory of user */
-		*cups_encryption,	/* CUPS_ENCRYPTION env var */
-		*cups_server,		/* CUPS_SERVER env var */
-		*cups_user,		/* CUPS_USER/USER env var */
-#ifdef HAVE_GSSAPI
-		*cups_gssservicename,	/* CUPS_GSSSERVICENAME env var */
-#endif /* HAVE_GSSAPI */
-		*cups_anyroot,		/* CUPS_ANYROOT env var */
-		*cups_expiredroot,	/* CUPS_EXPIREDROOT env var */
-		*cups_expiredcerts;	/* CUPS_EXPIREDCERTS env var */
+  const char	*home;			/* Home directory of user */
   char		filename[1024];		/* Filename */
+  _cups_client_conf_t cc;		/* client.conf values */
   _cups_globals_t *cg = _cupsGlobals();	/* Pointer to library globals */
 
 
   DEBUG_puts("_cupsSetDefaults()");
 
  /*
-  * First collect environment variables...
+  * Load initial client.conf values...
   */
 
-  cups_encryption     = getenv("CUPS_ENCRYPTION");
-  cups_server	      = getenv("CUPS_SERVER");
-#ifdef HAVE_GSSAPI
-  cups_gssservicename = getenv("CUPS_GSSSERVICENAME");
-#endif /* HAVE_GSSAPI */
-  cups_anyroot	      = getenv("CUPS_ANYROOT");
-  cups_expiredroot    = getenv("CUPS_EXPIREDROOT");
-  cups_expiredcerts   = getenv("CUPS_EXPIREDCERTS");
-
-  if ((cups_user = getenv("CUPS_USER")) == NULL)
-    cups_user = getenv("USER");
+  cups_init_client_conf(&cc);
 
  /*
-  * Then, if needed, read the ~/.cups/client.conf or /etc/cups/client.conf
-  * files to get the default values...
+  * Read the /etc/cups/client.conf and ~/.cups/client.conf files, if
+  * present.
   */
 
-  if (cg->encryption == (http_encryption_t)-1 || !cg->server[0] ||
-      !cg->user[0] || !cg->ipp_port)
+  snprintf(filename, sizeof(filename), "%s/client.conf", cg->cups_serverroot);
+  if ((fp = cupsFileOpen(filename, "r")) != NULL)
   {
-    if ((home = getenv("HOME")) != NULL)
-    {
-     /*
-      * Look for ~/.cups/client.conf...
-      */
-
-      snprintf(filename, sizeof(filename), "%s/.cups/client.conf", home);
-      fp = cupsFileOpen(filename, "r");
-    }
-    else
-      fp = NULL;
-
-    if (!fp)
-    {
-     /*
-      * Look for CUPS_SERVERROOT/client.conf...
-      */
-
-      snprintf(filename, sizeof(filename), "%s/client.conf",
-               cg->cups_serverroot);
-      fp = cupsFileOpen(filename, "r");
-    }
-
-   /*
-    * Read the configuration file and apply any environment variables; both
-    * functions handle NULL cups_file_t pointers...
-    */
-
-    cups_read_client_conf(fp, cg, cups_encryption, cups_server, cups_user,
-#ifdef HAVE_GSSAPI
-			  cups_gssservicename,
-#endif /* HAVE_GSSAPI */
-			  cups_anyroot, cups_expiredroot,
-			  cups_expiredcerts);
+    cups_read_client_conf(fp, &cc);
     cupsFileClose(fp);
   }
+
+#  ifdef HAVE_GETEUID
+  if ((geteuid() == getuid() || !getuid()) && getegid() == getgid() && (home = getenv("HOME")) != NULL)
+#  elif !defined(WIN32)
+  if (getuid() && (home = getenv("HOME")) != NULL)
+#  else
+  if ((home = getenv("HOME")) != NULL)
+#  endif /* HAVE_GETEUID */
+  {
+   /*
+    * Look for ~/.cups/client.conf...
+    */
+
+    snprintf(filename, sizeof(filename), "%s/.cups/client.conf", home);
+    if ((fp = cupsFileOpen(filename, "r")) != NULL)
+    {
+      cups_read_client_conf(fp, &cc);
+      cupsFileClose(fp);
+    }
+  }
+
+ /*
+  * Finalize things so every client.conf value is set...
+  */
+
+  cups_finalize_client_conf(&cc);
+
+  if (cg->encryption == (http_encryption_t)-1)
+    cg->encryption = cc.encryption;
+
+  if (!cg->server[0] || !cg->ipp_port)
+    cupsSetServer(cc.server_name);
+
+  if (!cg->ipp_port)
+    cups_set_default_ipp_port(cg);
+
+  if (!cg->user[0])
+    strlcpy(cg->user, cc.user, sizeof(cg->user));
+
+#ifdef HAVE_GSSAPI
+  if (!cg->gss_service_name[0])
+    strlcpy(cg->gss_service_name, cc.gss_service_name, sizeof(cg->gss_service_name));
+#endif /* HAVE_GSSAPI */
+
+  if (cg->trust_first < 0)
+    cg->trust_first = cc.trust_first;
+
+  if (cg->any_root < 0)
+    cg->any_root = cc.any_root;
+
+  if (cg->expired_certs < 0)
+    cg->expired_certs = cc.expired_certs;
+
+  if (cg->validate_certs < 0)
+    cg->validate_certs = cc.validate_certs;
+
+#ifdef HAVE_SSL
+  _httpTLSSetOptions(cc.ssl_options);
+#endif /* HAVE_SSL */
+}
+
+
+#ifdef __APPLE__
+/*
+ * 'cups_apple_get_boolean()' - Get a boolean setting from the CUPS preferences.
+ */
+
+static int				/* O - 1 if set, 0 otherwise */
+cups_apple_get_boolean(
+    CFStringRef key,			/* I - Key (name) */
+    int         *value)			/* O - Boolean value */
+{
+  Boolean	bval,			/* Preference value */
+		bval_set;		/* Value is set? */
+
+
+  bval = CFPreferencesGetAppBooleanValue(key, kCUPSPrintingPrefs, &bval_set);
+
+  if (bval_set)
+    *value = (int)bval;
+
+  return ((int)bval_set);
+}
+
+
+/*
+ * 'cups_apple_get_string()' - Get a string setting from the CUPS preferences.
+ */
+
+static int				/* O - 1 if set, 0 otherwise */
+cups_apple_get_string(
+    CFStringRef key,			/* I - Key (name) */
+    char        *value,			/* O - String value */
+    size_t      valsize)		/* I - Size of value buffer */
+{
+  CFStringRef	sval;			/* String value */
+
+
+  if ((sval = CFPreferencesCopyAppValue(key, kCUPSPrintingPrefs)) != NULL)
+  {
+    Boolean result = CFStringGetCString(sval, value, (CFIndex)valsize, kCFStringEncodingUTF8);
+
+    CFRelease(sval);
+
+    if (result)
+      return (1);
+  }
+
+  return (0);
+}
+#endif /* __APPLE__ */
+
+
+/*
+ * 'cups_boolean_value()' - Convert a string to a boolean value.
+ */
+
+static int				/* O - Boolean value */
+cups_boolean_value(const char *value)	/* I - String value */
+{
+  return (!_cups_strcasecmp(value, "yes") || !_cups_strcasecmp(value, "on") || !_cups_strcasecmp(value, "true"));
+}
+
+
+/*
+ * 'cups_finalize_client_conf()' - Finalize client.conf values.
+ */
+
+static void
+cups_finalize_client_conf(
+    _cups_client_conf_t *cc)		/* I - client.conf values */
+{
+  const char	*value;			/* Environment variable */
+
+
+  if ((value = getenv("CUPS_TRUSTFIRST")) != NULL)
+    cc->trust_first = cups_boolean_value(value);
+
+  if ((value = getenv("CUPS_ANYROOT")) != NULL)
+    cc->any_root = cups_boolean_value(value);
+
+  if ((value = getenv("CUPS_ENCRYPTION")) != NULL)
+    cups_set_encryption(cc, value);
+
+  if ((value = getenv("CUPS_EXPIREDCERTS")) != NULL)
+    cc->expired_certs = cups_boolean_value(value);
+
+#ifdef HAVE_GSSAPI
+  if ((value = getenv("CUPS_GSSSERVICENAME")) != NULL)
+    cups_set_gss_service_name(cc, value);
+#endif /* HAVE_GSSAPI */
+
+  if ((value = getenv("CUPS_SERVER")) != NULL)
+    cups_set_server_name(cc, value);
+
+  if ((value = getenv("CUPS_USER")) != NULL)
+    cups_set_user(cc, value);
+
+  if ((value = getenv("CUPS_VALIDATECERTS")) != NULL)
+    cc->validate_certs = cups_boolean_value(value);
+
+ /*
+  * Then apply defaults for those values that haven't been set...
+  */
+
+  if (cc->trust_first < 0)
+    cc->trust_first = 1;
+
+  if (cc->any_root < 0)
+    cc->any_root = 1;
+
+  if (cc->encryption == (http_encryption_t)-1)
+    cc->encryption = HTTP_ENCRYPTION_IF_REQUESTED;
+
+  if (cc->expired_certs < 0)
+    cc->expired_certs = 0;
+
+#ifdef HAVE_GSSAPI
+  if (!cc->gss_service_name[0])
+    cups_set_gss_service_name(cc, CUPS_DEFAULT_GSSSERVICENAME);
+#endif /* HAVE_GSSAPI */
+
+  if (!cc->server_name[0])
+  {
+#ifdef CUPS_DEFAULT_DOMAINSOCKET
+   /*
+    * If we are compiled with domain socket support, only use the
+    * domain socket if it exists and has the right permissions...
+    */
+
+    if (!access(CUPS_DEFAULT_DOMAINSOCKET, R_OK))
+      cups_set_server_name(cc, CUPS_DEFAULT_DOMAINSOCKET);
+    else
+#endif /* CUPS_DEFAULT_DOMAINSOCKET */
+      cups_set_server_name(cc, "localhost");
+  }
+
+  if (!cc->user[0])
+  {
+#ifdef WIN32
+   /*
+    * Get the current user name from the OS...
+    */
+
+    DWORD	size;			/* Size of string */
+
+    size = sizeof(cc->user);
+    if (!GetUserName(cc->user, &size))
+#else
+   /*
+    * Try the USER environment variable as the default username...
+    */
+
+    const char *envuser = getenv("USER");
+					/* Default username */
+    struct passwd *pw = NULL;		/* Account information */
+
+    if (envuser)
+    {
+     /*
+      * Validate USER matches the current UID, otherwise don't allow it to
+      * override things...  This makes sure that printing after doing su
+      * or sudo records the correct username.
+      */
+
+      if ((pw = getpwnam(envuser)) != NULL && pw->pw_uid != getuid())
+	pw = NULL;
+    }
+
+    if (!pw)
+      pw = getpwuid(getuid());
+
+    if (pw)
+      strlcpy(cc->user, pw->pw_name, sizeof(cc->user));
+    else
+#endif /* WIN32 */
+    {
+     /*
+      * Use the default "unknown" user name...
+      */
+
+      strlcpy(cc->user, "unknown", sizeof(cc->user));
+    }
+  }
+
+  if (cc->validate_certs < 0)
+    cc->validate_certs = 0;
+}
+
+
+/*
+ * 'cups_init_client_conf()' - Initialize client.conf values.
+ */
+
+static void
+cups_init_client_conf(
+    _cups_client_conf_t *cc)		/* I - client.conf values */
+{
+ /*
+  * Clear all values to "not set"...
+  */
+
+  memset(cc, 0, sizeof(_cups_client_conf_t));
+
+  cc->encryption     = (http_encryption_t)-1;
+  cc->trust_first    = -1;
+  cc->any_root       = -1;
+  cc->expired_certs  = -1;
+  cc->validate_certs = -1;
+
+ /*
+  * Load settings from the org.cups.PrintingPrefs plist (which trump
+  * everything...)
+  */
+
+#ifdef __APPLE__
+  char	sval[1024];			/* String value */
+  int	bval;				/* Boolean value */
+
+  if (cups_apple_get_boolean(kAllowAnyRootKey, &bval))
+    cc->any_root = bval;
+
+  if (cups_apple_get_boolean(kAllowExpiredCertsKey, &bval))
+    cc->expired_certs = bval;
+
+  if (cups_apple_get_string(kEncryptionKey, sval, sizeof(sval)))
+    cups_set_encryption(cc, sval);
+
+  if (cups_apple_get_string(kSSLOptionsKey, sval, sizeof(sval)))
+    cups_set_ssl_options(cc, sval);
+
+  if (cups_apple_get_boolean(kTrustOnFirstUseKey, &bval))
+    cc->trust_first = bval;
+
+  if (cups_apple_get_boolean(kValidateCertsKey, &bval))
+    cc->validate_certs = bval;
+#endif /* __APPLE__ */
 }
 
 
@@ -850,33 +1202,12 @@ _cupsSetDefaults(void)
 
 static void
 cups_read_client_conf(
-    cups_file_t     *fp,		/* I - File to read */
-    _cups_globals_t *cg,		/* I - Global data */
-    const char      *cups_encryption,	/* I - CUPS_ENCRYPTION env var */
-    const char      *cups_server,	/* I - CUPS_SERVER env var */
-    const char      *cups_user,		/* I - CUPS_USER env var */
-#ifdef HAVE_GSSAPI
-    const char      *cups_gssservicename,
-					/* I - CUPS_GSSSERVICENAME env var */
-#endif /* HAVE_GSSAPI */
-    const char	    *cups_anyroot,	/* I - CUPS_ANYROOT env var */
-    const char	    *cups_expiredroot,	/* I - CUPS_EXPIREDROOT env var */
-    const char	    *cups_expiredcerts)	/* I - CUPS_EXPIREDCERTS env var */
+    cups_file_t         *fp,		/* I - File to read */
+    _cups_client_conf_t *cc)		/* I - client.conf values */
 {
   int	linenum;			/* Current line number */
   char	line[1024],			/* Line from file */
-        *value,				/* Pointer into line */
-	encryption[1024],		/* Encryption value */
-#ifndef __APPLE__
-	server_name[1024],		/* ServerName value */
-#endif /* !__APPLE__ */
-	user[256],			/* User value */
-	any_root[1024],			/* AllowAnyRoot value */
-	expired_root[1024],		/* AllowExpiredRoot value */
-	expired_certs[1024];		/* AllowExpiredCerts value */
-#ifdef HAVE_GSSAPI
-  char	gss_service_name[32];		/* GSSServiceName value */
-#endif /* HAVE_GSSAPI */
+        *value;				/* Pointer into line */
 
 
  /*
@@ -886,183 +1217,178 @@ cups_read_client_conf(
   linenum = 0;
   while (cupsFileGetConf(fp, line, sizeof(line), &value, &linenum))
   {
-    if (!cups_encryption && cg->encryption == (http_encryption_t)-1 &&
-        !_cups_strcasecmp(line, "Encryption") && value)
-    {
-      strlcpy(encryption, value, sizeof(encryption));
-      cups_encryption = encryption;
-    }
+    if (!_cups_strcasecmp(line, "Encryption") && value)
+      cups_set_encryption(cc, value);
 #ifndef __APPLE__
    /*
-    * The Server directive is not supported on OS X due to app sandboxing
-    * restrictions, i.e. not all apps request network access.
+    * The ServerName directive is not supported on macOS due to app
+    * sandboxing restrictions, i.e. not all apps request network access.
     */
-    else if (!cups_server && (!cg->server[0] || !cg->ipp_port) &&
-             !_cups_strcasecmp(line, "ServerName") && value)
-    {
-      strlcpy(server_name, value, sizeof(server_name));
-      cups_server = server_name;
-    }
+    else if (!_cups_strcasecmp(line, "ServerName") && value)
+      cups_set_server_name(cc, value);
 #endif /* !__APPLE__ */
-    else if (!cups_user && !_cups_strcasecmp(line, "User") && value)
-    {
-      strlcpy(user, value, sizeof(user));
-      cups_user = user;
-    }
-    else if (!cups_anyroot && !_cups_strcasecmp(line, "AllowAnyRoot") && value)
-    {
-      strlcpy(any_root, value, sizeof(any_root));
-      cups_anyroot = any_root;
-    }
-    else if (!cups_expiredroot && !_cups_strcasecmp(line, "AllowExpiredRoot") &&
+    else if (!_cups_strcasecmp(line, "User") && value)
+      cups_set_user(cc, value);
+    else if (!_cups_strcasecmp(line, "TrustOnFirstUse") && value)
+      cc->trust_first = cups_boolean_value(value);
+    else if (!_cups_strcasecmp(line, "AllowAnyRoot") && value)
+      cc->any_root = cups_boolean_value(value);
+    else if (!_cups_strcasecmp(line, "AllowExpiredCerts") &&
              value)
-    {
-      strlcpy(expired_root, value, sizeof(expired_root));
-      cups_expiredroot = expired_root;
-    }
-    else if (!cups_expiredcerts && !_cups_strcasecmp(line, "AllowExpiredCerts") &&
-             value)
-    {
-      strlcpy(expired_certs, value, sizeof(expired_certs));
-      cups_expiredcerts = expired_certs;
-    }
+      cc->expired_certs = cups_boolean_value(value);
+    else if (!_cups_strcasecmp(line, "ValidateCerts") && value)
+      cc->validate_certs = cups_boolean_value(value);
 #ifdef HAVE_GSSAPI
-    else if (!cups_gssservicename && !_cups_strcasecmp(line, "GSSServiceName") &&
-             value)
-    {
-      strlcpy(gss_service_name, value, sizeof(gss_service_name));
-      cups_gssservicename = gss_service_name;
-    }
+    else if (!_cups_strcasecmp(line, "GSSServiceName") && value)
+      cups_set_gss_service_name(cc, value);
 #endif /* HAVE_GSSAPI */
+#ifdef HAVE_SSL
+    else if (!_cups_strcasecmp(line, "SSLOptions") && value)
+      cups_set_ssl_options(cc, value);
+#endif /* HAVE_SSL */
   }
+}
 
- /*
-  * Set values...
-  */
 
-  if (cg->encryption == (http_encryption_t)-1 && cups_encryption)
+/*
+ * 'cups_set_default_ipp_port()' - Set the default IPP port value.
+ */
+
+static void
+cups_set_default_ipp_port(
+    _cups_globals_t *cg)		/* I - Global data */
+{
+  const char	*ipp_port;		/* IPP_PORT environment variable */
+
+
+  if ((ipp_port = getenv("IPP_PORT")) != NULL)
   {
-    if (!_cups_strcasecmp(cups_encryption, "never"))
-      cg->encryption = HTTP_ENCRYPT_NEVER;
-    else if (!_cups_strcasecmp(cups_encryption, "always"))
-      cg->encryption = HTTP_ENCRYPT_ALWAYS;
-    else if (!_cups_strcasecmp(cups_encryption, "required"))
-      cg->encryption = HTTP_ENCRYPT_REQUIRED;
-    else
-      cg->encryption = HTTP_ENCRYPT_IF_REQUESTED;
-  }
-
-  if ((!cg->server[0] || !cg->ipp_port) && cups_server)
-    cupsSetServer(cups_server);
-
-  if (!cg->server[0])
-  {
-#ifdef CUPS_DEFAULT_DOMAINSOCKET
-   /*
-    * If we are compiled with domain socket support, only use the
-    * domain socket if it exists and has the right permissions...
-    */
-
-    struct stat	sockinfo;		/* Domain socket information */
-
-    if (!stat(CUPS_DEFAULT_DOMAINSOCKET, &sockinfo) &&
-	(sockinfo.st_mode & S_IRWXO) == S_IRWXO)
-      cups_server = CUPS_DEFAULT_DOMAINSOCKET;
-    else
-#endif /* CUPS_DEFAULT_DOMAINSOCKET */
-      cups_server = "localhost";
-
-    cupsSetServer(cups_server);
-  }
-
-  if (!cg->ipp_port)
-  {
-    const char	*ipp_port;		/* IPP_PORT environment variable */
-
-    if ((ipp_port = getenv("IPP_PORT")) != NULL)
-    {
-      if ((cg->ipp_port = atoi(ipp_port)) <= 0)
-        cg->ipp_port = CUPS_DEFAULT_IPP_PORT;
-    }
-    else
+    if ((cg->ipp_port = atoi(ipp_port)) <= 0)
       cg->ipp_port = CUPS_DEFAULT_IPP_PORT;
   }
+  else
+    cg->ipp_port = CUPS_DEFAULT_IPP_PORT;
+}
 
-  if (!cg->user[0])
-  {
-    if (cups_user)
-      strlcpy(cg->user, cups_user, sizeof(cg->user));
-    else
-    {
-#ifdef WIN32
-     /*
-      * Get the current user name from the OS...
-      */
+/*
+ * 'cups_set_encryption()' - Set the Encryption value.
+ */
 
-      DWORD	size;			/* Size of string */
+static void
+cups_set_encryption(
+    _cups_client_conf_t *cc,		/* I - client.conf values */
+    const char          *value)		/* I - Value */
+{
+  if (!_cups_strcasecmp(value, "never"))
+    cc->encryption = HTTP_ENCRYPTION_NEVER;
+  else if (!_cups_strcasecmp(value, "always"))
+    cc->encryption = HTTP_ENCRYPTION_ALWAYS;
+  else if (!_cups_strcasecmp(value, "required"))
+    cc->encryption = HTTP_ENCRYPTION_REQUIRED;
+  else
+    cc->encryption = HTTP_ENCRYPTION_IF_REQUESTED;
+}
 
-      size = sizeof(cg->user);
-      if (!GetUserName(cg->user, &size))
-#else
-     /*
-      * Get the user name corresponding to the current UID...
-      */
 
-      struct passwd	*pwd;		/* User/password entry */
-
-      // 07/22/2016 Mopria-notice: setpwent is not defined in Android so commenting out
-      //setpwent();
-      if ((pwd = getpwuid(getuid())) != NULL)
-      {
-       /*
-	* Found a match!
-	*/
-
-	strlcpy(cg->user, pwd->pw_name, sizeof(cg->user));
-      }
-      else
-#endif /* WIN32 */
-      {
-       /*
-	* Use the default "unknown" user name...
-	*/
-
-	strcpy(cg->user, "unknown");
-      }
-    }
-  }
+/*
+ * 'cups_set_gss_service_name()' - Set the GSSServiceName value.
+ */
 
 #ifdef HAVE_GSSAPI
-  if (!cups_gssservicename)
-    cups_gssservicename = CUPS_DEFAULT_GSSSERVICENAME;
-
-  strlcpy(cg->gss_service_name, cups_gssservicename,
-	  sizeof(cg->gss_service_name));
+static void
+cups_set_gss_service_name(
+    _cups_client_conf_t *cc,		/* I - client.conf values */
+    const char          *value)		/* I - Value */
+{
+  strlcpy(cc->gss_service_name, value, sizeof(cc->gss_service_name));
+}
 #endif /* HAVE_GSSAPI */
 
-  if (cups_anyroot)
-    cg->any_root = !_cups_strcasecmp(cups_anyroot, "yes") ||
-		   !_cups_strcasecmp(cups_anyroot, "on")  ||
-		   !_cups_strcasecmp(cups_anyroot, "true");
 
-  if (cups_expiredroot)
-    cg->expired_root  = !_cups_strcasecmp(cups_expiredroot, "yes") ||
-			!_cups_strcasecmp(cups_expiredroot, "on")  ||
-			!_cups_strcasecmp(cups_expiredroot, "true");
+/*
+ * 'cups_set_server_name()' - Set the ServerName value.
+ */
 
-  if (cups_expiredcerts)
-    cg->expired_certs = !_cups_strcasecmp(cups_expiredcerts, "yes") ||
-			!_cups_strcasecmp(cups_expiredcerts, "on")  ||
-			!_cups_strcasecmp(cups_expiredcerts, "true");
+static void
+cups_set_server_name(
+    _cups_client_conf_t *cc,		/* I - client.conf values */
+    const char          *value)		/* I - Value */
+{
+  strlcpy(cc->server_name, value, sizeof(cc->server_name));
+}
+
+
+/*
+ * 'cups_set_ssl_options()' - Set the SSLOptions value.
+ */
+
+#ifdef HAVE_SSL
+static void
+cups_set_ssl_options(
+    _cups_client_conf_t *cc,		/* I - client.conf values */
+    const char          *value)		/* I - Value */
+{
+ /*
+  * SSLOptions [AllowRC4] [AllowSSL3] [AllowDH] [DenyTLS1.0] [None]
+  */
+
+  int	options = _HTTP_TLS_NONE;	/* SSL/TLS options */
+  char	temp[256],			/* Copy of value */
+	*start,				/* Start of option */
+	*end;				/* End of option */
+
+
+  strlcpy(temp, value, sizeof(temp));
+
+  for (start = temp; *start; start = end)
+  {
+   /*
+    * Find end of keyword...
+    */
+
+    end = start;
+    while (*end && !_cups_isspace(*end))
+      end ++;
+
+    if (*end)
+      *end++ = '\0';
+
+   /*
+    * Compare...
+    */
+
+    if (!_cups_strcasecmp(start, "AllowRC4"))
+      options |= _HTTP_TLS_ALLOW_RC4;
+    else if (!_cups_strcasecmp(start, "AllowSSL3"))
+      options |= _HTTP_TLS_ALLOW_SSL3;
+    else if (!_cups_strcasecmp(start, "AllowDH"))
+      options |= _HTTP_TLS_ALLOW_DH;
+    else if (!_cups_strcasecmp(start, "DenyTLS1.0"))
+      options |= _HTTP_TLS_DENY_TLS10;
+    else if (!_cups_strcasecmp(start, "None"))
+      options = _HTTP_TLS_NONE;
+  }
+
+  cc->ssl_options = options;
+
+  DEBUG_printf(("4cups_set_ssl_options(cc=%p, value=\"%s\") options=%x", (void *)cc, value, options));
+}
+#endif /* HAVE_SSL */
+
+
+/*
+ * 'cups_set_user()' - Set the User value.
+ */
+
+static void
+cups_set_user(
+    _cups_client_conf_t *cc,		/* I - client.conf values */
+    const char          *value)		/* I - Value */
+{
+  strlcpy(cc->user, value, sizeof(cc->user));
 }
 
 // 07/22/2016 Mopria-notice: localeconv is not defined in Android so need to define for cross compilation
 struct lconv *localeconv(void) {
     return NULL;
 }
-
-/*
- * End of "$Id: usersys.c 8498 2009-04-13 17:03:15Z mike $".
- */
-
-

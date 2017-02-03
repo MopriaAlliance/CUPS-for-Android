@@ -1,29 +1,16 @@
 /*
- * "$Id: globals.c 7870 2008-08-27 18:14:10Z mike $"
+ * Global variable access routines for CUPS.
  *
- *   Global variable access routines for CUPS.
+ * Copyright 2007-2015 by Apple Inc.
+ * Copyright 1997-2007 by Easy Software Products, all rights reserved.
  *
- *   Copyright 2007-2013 by Apple Inc.
- *   Copyright 1997-2007 by Easy Software Products, all rights reserved.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   _cupsGlobalLock()    - Lock the global mutex.
- *   _cupsGlobals()       - Return a pointer to thread local storage
- *   _cupsGlobalUnlock()  - Unlock the global mutex.
- *   DllMain()            - Main entry for library.
- *   cups_fix_path()      - Fix a file path to use forward slashes consistently.
- *   cups_globals_alloc() - Allocate and initialize global data.
- *   cups_globals_free()  - Free global data.
- *   cups_globals_init()  - Initialize environment variables.
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -37,7 +24,10 @@
  * Local globals...
  */
 
-
+#ifdef DEBUG
+static int		cups_global_index = 0;
+					/* Next thread number */
+#endif /* DEBUG */
 static _cups_threadkey_t cups_globals_key = _CUPS_THREADKEY_INITIALIZER;
 					/* Thread local storage key */
 #ifdef HAVE_PTHREAD_H
@@ -212,9 +202,18 @@ cups_globals_alloc(void)
   memset(cg, 0, sizeof(_cups_globals_t));
   cg->encryption     = (http_encryption_t)-1;
   cg->password_cb    = (cups_password_cb2_t)_cupsGetPassword;
-  cg->any_root       = 1;
-  cg->expired_certs  = 1;
-  cg->expired_root   = 1;
+  cg->trust_first    = -1;
+  cg->any_root       = -1;
+  cg->expired_certs  = -1;
+  cg->validate_certs = -1;
+
+#ifdef DEBUG
+ /*
+  * Friendly thread ID for debugging...
+  */
+
+  cg->thread_id = ++ cups_global_index;
+#endif /* DEBUG */
 
  /*
   * Then set directories as appropriate...
@@ -227,7 +226,7 @@ cups_globals_alloc(void)
     * Open the registry...
     */
 
-    strcpy(installdir, "C:/Program Files/cups.org");
+    strlcpy(installdir, "C:/Program Files/cups.org", sizeof(installdir));
 
     if (!RegOpenKeyEx(HKEY_LOCAL_MACHINE, "SOFTWARE\\cups.org", 0, KEY_READ,
                       &key))
@@ -349,7 +348,9 @@ cups_globals_free(_cups_globals_t *cg)	/* I - Pointer to global data */
 
   httpClose(cg->http);
 
+#ifdef HAVE_SSL
   _httpFreeCredentials(cg->tls_credentials);
+#endif /* HAVE_SSL */
 
   cupsFileClose(cg->stdio_files[0]);
   cupsFileClose(cg->stdio_files[1]);
@@ -377,8 +378,3 @@ cups_globals_init(void)
   pthread_key_create(&cups_globals_key, (void (*)(void *))cups_globals_free);
 }
 #endif /* HAVE_PTHREAD_H */
-
-
-/*
- * End of "$Id: globals.c 7870 2008-08-27 18:14:10Z mike $".
- */

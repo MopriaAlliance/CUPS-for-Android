@@ -1,16 +1,14 @@
 /*
- * "$Id: config.h.in 7918 2008-09-08 22:03:01Z mike $"
+ * Configuration file for CUPS.
  *
- *   Configuration file for CUPS.
+ * Copyright 2007-2016 by Apple Inc.
+ * Copyright 1997-2007 by Easy Software Products.
  *
- *   Copyright 2007-2012 by Apple Inc.
- *   Copyright 1997-2007 by Easy Software Products.
- *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  */
 
 #ifndef _CUPS_CONFIG_H_
@@ -93,7 +91,7 @@
  * Default MaxCopies value...
  */
 
-#define CUPS_DEFAULT_MAX_COPIES	100
+#define CUPS_DEFAULT_MAX_COPIES	9999
 
 
 /*
@@ -132,23 +130,25 @@
 
 
 /*
- * Do we have various image libraries?
+ * Do we have posix_spawn?
  */
 
-#undef HAVE_LIBPNG
+#undef HAVE_POSIX_SPAWN
+
+
+/*
+ * Do we have ZLIB?
+ */
+
 #undef HAVE_LIBZ
-#undef HAVE_LIBJPEG
-#undef HAVE_LIBTIFF
+#undef HAVE_INFLATECOPY
 
 
 /*
  * Do we have PAM stuff?
  */
 
-#ifndef HAVE_LIBPAM
 #define HAVE_LIBPAM 0
-#endif /* !HAVE_LIBPAM */
-
 #undef HAVE_PAM_PAM_APPL_H
 #undef HAVE_PAM_SET_ITEM
 #undef HAVE_PAM_SETCRED
@@ -166,13 +166,6 @@
  */
 
 #undef HAVE_CRYPT_H
-
-
-/*
- * Do we have <scsi/sg.h>?
- */
-
-#undef HAVE_SCSI_SG_H
 
 
 /*
@@ -248,6 +241,20 @@
 
 
 /*
+ * Do we have the ASL functions?
+ */
+
+#undef HAVE_ASL_H
+
+
+/*
+ * Do we have the systemd journal functions?
+ */
+
+#undef HAVE_SYSTEMD_SD_JOURNAL_H
+
+
+/*
  * Do we have the (v)snprintf() functions?
  */
 
@@ -299,15 +306,22 @@
 
 #undef HAVE_CDSASSL
 #undef HAVE_GNUTLS
-#undef HAVE_LIBSSL
+#undef HAVE_SSPISSL
 #undef HAVE_SSL
 
 
 /*
- * Do we have the SSL_set_tlsext_host_name function?
+ * Do we have the gnutls_transport_set_pull_timeout_function function?
  */
 
-#undef HAVE_SSL_SET_TLSEXT_HOST_NAME
+#undef HAVE_GNUTLS_TRANSPORT_SET_PULL_TIMEOUT_FUNCTION
+
+
+/*
+ * Do we have the gnutls_priority_set_direct function?
+ */
+
+#undef HAVE_GNUTLS_PRIORITY_SET_DIRECT
 
 
 /*
@@ -326,38 +340,31 @@
 
 
 /*
- * Do we have the SecCertificateCopyData function?
- */
-
-#undef HAVE_SECCERTIFICATECOPYDATA
-
-
-/*
- * Do we have the SecIdentitySearchCreateWithPolicy function?
- */
-
-#undef HAVE_SECIDENTITYSEARCHCREATEWITHPOLICY
-
-
-/*
- * Do we have the SecPolicyCreateSSL function?
- */
-
-#undef HAVE_SECPOLICYCREATESSL
-
-
-/*
- * Do we have the SecPolicyCreateSSL function?
- */
-
-#undef HAVE_SECPOLICYCREATESSL
-
-
-/*
  * Do we have the cssmErrorString function?
  */
 
 #undef HAVE_CSSMERRORSTRING
+
+
+/*
+ * Do we have the SecGenerateSelfSignedCertificate function?
+ */
+
+#undef HAVE_SECGENERATESELFSIGNEDCERTIFICATE
+
+
+/*
+ * Do we have the SecKeychainOpen function?
+ */
+
+#undef HAVE_SECKEYCHAINOPEN
+
+
+/*
+ * Do we have (a working) SSLSetEnabledCiphers function?
+ */
+
+#undef HAVE_SSLSETENABLEDCIPHERS
 
 
 /*
@@ -466,17 +473,17 @@
 
 
 /*
- * Do we have the AIX usersec.h header file?
- */
-
-#undef HAVE_USERSEC_H
-
-
-/*
  * Do we have pthread support?
  */
 
 #undef HAVE_PTHREAD_H
+
+
+/*
+ * Do we have on-demand support (launchd/systemd/upstart)?
+ */
+
+#undef HAVE_ONDEMAND
 
 
 /*
@@ -485,6 +492,20 @@
 
 #undef HAVE_LAUNCH_H
 #undef HAVE_LAUNCHD
+
+
+/*
+ * Do we have systemd support?
+ */
+
+#undef HAVE_SYSTEMD
+
+
+/*
+ * Do we have upstart support?
+ */
+
+#undef HAVE_UPSTART
 
 
 /*
@@ -499,24 +520,6 @@
 #define CUPS_PHP	"/usr/bin/php"
 #undef HAVE_PYTHON
 #define CUPS_PYTHON	"/usr/bin/python"
-
-
-/*
- * Location of the poppler/Xpdf pdftops program...
- */
-
-#undef HAVE_PDFTOPS
-#undef HAVE_PDFTOPS_WITH_ORIGPAGESIZES
-#define CUPS_PDFTOPS	"/usr/bin/pdftops"
-
-
-/*
- * Location of the Ghostscript gs program...
- */
-
-#undef HAVE_GHOSTSCRIPT
-#undef HAVE_GHOSTSCRIPT_PS2WRITE
-#define CUPS_GHOSTSCRIPT "/usr/bin/gs"
 
 
 /*
@@ -543,7 +546,14 @@
 
 
 /*
- * Do we have OS X 10.4's mbr_XXX functions?
+ * Do we have the getgrouplist() function?
+ */
+
+#undef HAVE_GETGROUPLIST
+
+
+/*
+ * Do we have macOS 10.4's mbr_XXX functions?
  */
 
 #undef HAVE_MEMBERSHIP_H
@@ -560,18 +570,12 @@
 
 
 /*
- * Do we have Darwin's IOKit private headers?
- */
-
-#undef HAVE_IOKIT_PWR_MGT_IOPMLIBPRIVATE_H
-
-
-/*
  * Do we have DBUS?
  */
 
 #undef HAVE_DBUS
 #undef HAVE_DBUS_MESSAGE_ITER_INIT_APPEND
+#undef HAVE_DBUS_THREADS_INIT
 
 
 /*
@@ -648,7 +652,7 @@
 
 #ifdef HAVE_ARC4RANDOM
 #  define CUPS_RAND() arc4random()
-#  define CUPS_SRAND(v) arc4random_stir()
+#  define CUPS_SRAND(v)
 #elif defined(HAVE_RANDOM)
 #  define CUPS_RAND() random()
 #  define CUPS_SRAND(v) srandom(v)
@@ -659,13 +663,6 @@
 #  define CUPS_RAND() rand()
 #  define CUPS_SRAND(v) srand(v)
 #endif /* HAVE_ARC4RANDOM */
-
-
-/*
- * Do we have vproc_transaction_begin/end?
- */
-
-#undef HAVE_VPROC_TRANSACTION_BEGIN
 
 
 /*
@@ -702,7 +699,7 @@
 
 
 /*
- * Location of OS X localization bundle, if any.
+ * Location of macOS localization bundle, if any.
  */
 
 #undef CUPS_BUNDLEDIR
@@ -741,7 +738,3 @@ static __inline int _cups_abs(int i) { return (i < 0 ? -i : i); }
 #endif /* !HAVE_ABS && !abs */
 
 #endif /* !_CUPS_CONFIG_H_ */
-
-/*
- * End of "$Id: config.h.in 7918 2008-09-08 22:03:01Z mike $".
- */

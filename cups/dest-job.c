@@ -1,25 +1,15 @@
 /*
- * "$Id: dest-job.c 3833 2012-05-23 22:51:18Z msweet $"
+ * Destination job support for CUPS.
  *
- *   Destination job support for CUPS.
+ * Copyright 2012-2016 by Apple Inc.
  *
- *   Copyright 2012 by Apple Inc.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
-﻿ *   cupsCancelDestJob()      - Cancel a job on a destination.
- *   cupsCloseDestJob()       - Close a job and start printing.
- *   cupsCreateDestJob()      - Create a job on a destination.
- *   cupsFinishDestDocument() - Finish the current document.
- *   cupsStartDestDocument()  - Start a new document.
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -34,10 +24,11 @@
  *
  * The "job_id" is the number returned by cupsCreateDestJob.
  *
- * Returns IPP_OK on success and IPP_NOT_AUTHORIZED or IPP_FORBIDDEN on
- * failure.
+ * Returns @code IPP_STATUS_OK@ on success and
+ * @code IPP_STATUS_ERRPR_NOT_AUTHORIZED@ or
+ * @code IPP_STATUS_ERROR_FORBIDDEN@ on failure.
  *
- * @since CUPS 1.6/OS X 10.8@
+ * @since CUPS 1.6/macOS 10.8@
  */
 
 ipp_status_t
@@ -45,7 +36,26 @@ cupsCancelDestJob(http_t      *http,	/* I - Connection to destination */
                   cups_dest_t *dest,	/* I - Destination */
                   int         job_id)	/* I - Job ID */
 {
-  return (IPP_NOT_FOUND);
+  cups_dinfo_t	*info;			/* Destination information */
+
+
+  if ((info = cupsCopyDestInfo(http, dest)) != NULL)
+  {
+    ipp_t	*request;		/* Cancel-Job request */
+
+    request = ippNewRequest(IPP_OP_CANCEL_JOB);
+
+    ippSetVersion(request, info->version / 10, info->version % 10);
+
+    ippAddString(request, IPP_TAG_OPERATION, IPP_TAG_URI, "printer-uri", NULL, info->uri);
+    ippAddInteger(request, IPP_TAG_OPERATION, IPP_TAG_INTEGER, "job-id", job_id);
+    ippAddString(request, IPP_TAG_OPERATION, IPP_TAG_NAME, "requesting-user-name", NULL, cupsUser());
+
+    ippDelete(cupsDoRequest(http, request, info->resource));
+    cupsFreeDestInfo(info);
+  }
+
+  return (cupsLastError());
 }
 
 
@@ -53,10 +63,10 @@ cupsCancelDestJob(http_t      *http,	/* I - Connection to destination */
  * 'cupsCloseDestJob()' - Close a job and start printing.
  *
  * Use when the last call to cupsStartDocument passed 0 for "last_document".
- * "job_id" is the job ID returned by cupsCreateDestJob. Returns @code IPP_OK@
+ * "job_id" is the job ID returned by cupsCreateDestJob. Returns @code IPP_STATUS_OK@
  * on success.
  *
- * @since CUPS 1.6/OS X 10.8@
+ * @since CUPS 1.6/macOS 10.8@
  */
 
 ipp_status_t				/* O - IPP status code */
@@ -71,9 +81,7 @@ cupsCloseDestJob(
   ipp_attribute_t	*attr;		/* operations-supported attribute */
 
 
-  DEBUG_printf(("cupsCloseDestJob(http=%p, dest=%p(%s/%s), info=%p, job_id=%d)",
-                http, dest, dest ? dest->name : NULL,
-                dest ? dest->instance : NULL, info, job_id));
+  DEBUG_printf(("cupsCloseDestJob(http=%p, dest=%p(%s/%s), info=%p, job_id=%d)", (void *)http, (void *)dest, dest ? dest->name : NULL, dest ? dest->instance : NULL, (void *)info, job_id));
 
  /*
   * Range check input...
@@ -81,9 +89,9 @@ cupsCloseDestJob(
 
   if (!http || !dest || !info || job_id <= 0)
   {
-    _cupsSetError(IPP_INTERNAL_ERROR, strerror(EINVAL), 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(EINVAL), 0);
     DEBUG_puts("1cupsCloseDestJob: Bad arguments.");
-    return (IPP_INTERNAL_ERROR);
+    return (IPP_STATUS_ERROR_INTERNAL);
   }
 
  /*
@@ -94,23 +102,25 @@ cupsCloseDestJob(
                                IPP_TAG_ENUM)) != NULL)
   {
     for (i = 0; i < attr->num_values; i ++)
-      if (attr->values[i].integer == IPP_CLOSE_JOB)
+      if (attr->values[i].integer == IPP_OP_CLOSE_JOB)
       {
-        request = ippNewRequest(IPP_CLOSE_JOB);
+        request = ippNewRequest(IPP_OP_CLOSE_JOB);
         break;
       }
   }
 
   if (!request)
-    request = ippNewRequest(IPP_SEND_DOCUMENT);
+    request = ippNewRequest(IPP_OP_SEND_DOCUMENT);
 
   if (!request)
   {
-    _cupsSetError(IPP_INTERNAL_ERROR, strerror(ENOMEM), 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(ENOMEM), 0);
     DEBUG_puts("1cupsCloseDestJob: Unable to create Close-Job/Send-Document "
                "request.");
-    return (IPP_INTERNAL_ERROR);
+    return (IPP_STATUS_ERROR_INTERNAL);
   }
+
+  ippSetVersion(request, info->version / 10, info->version % 10);
 
   ippAddString(request, IPP_TAG_OPERATION, IPP_TAG_URI, "printer-uri",
                NULL, info->uri);
@@ -118,7 +128,7 @@ cupsCloseDestJob(
                 job_id);
   ippAddString(request, IPP_TAG_OPERATION, IPP_TAG_NAME, "requesting-user-name",
                NULL, cupsUser());
-  if (ippGetOperation(request) == IPP_SEND_DOCUMENT)
+  if (ippGetOperation(request) == IPP_OP_SEND_DOCUMENT)
     ippAddBoolean(request, IPP_TAG_OPERATION, "last-document", 1);
 
  /*
@@ -137,10 +147,10 @@ cupsCloseDestJob(
 /*
  * 'cupsCreateDestJob()' - Create a job on a destination.
  *
- * Returns @code IPP_OK@ or @code IPP_OK_SUBST@ on success, saving the job ID
+ * Returns @code IPP_STATUS_OK@ or @code IPP_STATUS_OK_SUBST@ on success, saving the job ID
  * in the variable pointed to by "job_id".
  *
- * @since CUPS 1.6/OS X 10.8@
+ * @since CUPS 1.6/macOS 10.8@
  */
 
 ipp_status_t				/* O - IPP status code */
@@ -159,10 +169,7 @@ cupsCreateDestJob(
 
 
   DEBUG_printf(("cupsCreateDestJob(http=%p, dest=%p(%s/%s), info=%p, "
-                "job_id=%p, title=\"%s\", num_options=%d, options=%p)",
-                http, dest, dest ? dest->name : NULL,
-                dest ? dest->instance : NULL, info, job_id, title, num_options,
-                options));
+                "job_id=%p, title=\"%s\", num_options=%d, options=%p)", (void *)http, (void *)dest, dest ? dest->name : NULL, dest ? dest->instance : NULL, (void *)info, (void *)job_id, title, num_options, (void *)options));
 
  /*
   * Range check input...
@@ -173,21 +180,23 @@ cupsCreateDestJob(
 
   if (!http || !dest || !info || !job_id)
   {
-    _cupsSetError(IPP_INTERNAL_ERROR, strerror(EINVAL), 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(EINVAL), 0);
     DEBUG_puts("1cupsCreateDestJob: Bad arguments.");
-    return (IPP_INTERNAL_ERROR);
+    return (IPP_STATUS_ERROR_INTERNAL);
   }
 
  /*
   * Build a Create-Job request...
   */
 
-  if ((request = ippNewRequest(IPP_CREATE_JOB)) == NULL)
+  if ((request = ippNewRequest(IPP_OP_CREATE_JOB)) == NULL)
   {
-    _cupsSetError(IPP_INTERNAL_ERROR, strerror(ENOMEM), 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(ENOMEM), 0);
     DEBUG_puts("1cupsCreateDestJob: Unable to create Create-Job request.");
-    return (IPP_INTERNAL_ERROR);
+    return (IPP_STATUS_ERROR_INTERNAL);
   }
+
+  ippSetVersion(request, info->version / 10, info->version % 10);
 
   ippAddString(request, IPP_TAG_OPERATION, IPP_TAG_URI, "printer-uri",
                NULL, info->uri);
@@ -197,6 +206,7 @@ cupsCreateDestJob(
     ippAddString(request, IPP_TAG_OPERATION, IPP_TAG_NAME, "job-name", NULL,
                  title);
 
+  cupsEncodeOptions2(request, num_options, options, IPP_TAG_OPERATION);
   cupsEncodeOptions2(request, num_options, options, IPP_TAG_JOB);
   cupsEncodeOptions2(request, num_options, options, IPP_TAG_SUBSCRIPTION);
 
@@ -228,9 +238,9 @@ cupsCreateDestJob(
 /*
  * 'cupsFinishDestDocument()' - Finish the current document.
  *
- * Returns @code IPP_OK@ or @code IPP_OK_SUBST@ on success.
+ * Returns @code IPP_STATUS_OK@ or @code IPP_STATUS_OK_SUBST@ on success.
  *
- * @since CUPS 1.6/OS X 10.8@
+ * @since CUPS 1.6/macOS 10.8@
  */
 
 ipp_status_t				/* O - Status of document submission */
@@ -239,9 +249,7 @@ cupsFinishDestDocument(
     cups_dest_t  *dest,			/* I - Destination */
     cups_dinfo_t *info) 		/* I - Destination information */
 {
-  DEBUG_printf(("cupsFinishDestDocument(http=%p, dest=%p(%s/%s), info=%p)",
-                http, dest, dest ? dest->name : NULL,
-                dest ? dest->instance : NULL, info));
+  DEBUG_printf(("cupsFinishDestDocument(http=%p, dest=%p(%s/%s), info=%p)", (void *)http, (void *)dest, dest ? dest->name : NULL, dest ? dest->instance : NULL, (void *)info));
 
  /*
   * Range check input...
@@ -249,9 +257,9 @@ cupsFinishDestDocument(
 
   if (!http || !dest || !info)
   {
-    _cupsSetError(IPP_INTERNAL_ERROR, strerror(EINVAL), 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(EINVAL), 0);
     DEBUG_puts("1cupsFinishDestDocument: Bad arguments.");
-    return (IPP_INTERNAL_ERROR);
+    return (IPP_STATUS_ERROR_INTERNAL);
   }
 
  /*
@@ -277,7 +285,7 @@ cupsFinishDestDocument(
  * if this is the last document to be submitted in the job.  Returns
  * @code HTTP_CONTINUE@ on success.
  *
- * @since CUPS 1.6/OS X 10.8@
+ * @since CUPS 1.6/macOS 10.8@
  */
 
 http_status_t				/* O - Status of document creation */
@@ -296,12 +304,7 @@ cupsStartDestDocument(
   http_status_t	status;			/* HTTP status */
 
 
-  DEBUG_printf(("cupsStartDestDocument(http=%p, dest=%p(%s/%s), info=%p, "
-                "job_id=%d, docname=\"%s\", format=\"%s\", num_options=%d, "
-                "options=%p, last_document=%d)",
-                http, dest, dest ? dest->name : NULL,
-                dest ? dest->instance : NULL, info, job_id, docname, format,
-                num_options, options, last_document));
+  DEBUG_printf(("cupsStartDestDocument(http=%p, dest=%p(%s/%s), info=%p, job_id=%d, docname=\"%s\", format=\"%s\", num_options=%d, options=%p, last_document=%d)", (void *)http, (void *)dest, dest ? dest->name : NULL, dest ? dest->instance : NULL, (void *)info, job_id, docname, format, num_options, (void *)options, last_document));
 
  /*
   * Range check input...
@@ -309,22 +312,24 @@ cupsStartDestDocument(
 
   if (!http || !dest || !info || job_id <= 0)
   {
-    _cupsSetError(IPP_INTERNAL_ERROR, strerror(EINVAL), 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(EINVAL), 0);
     DEBUG_puts("1cupsStartDestDocument: Bad arguments.");
-    return (HTTP_ERROR);
+    return (HTTP_STATUS_ERROR);
   }
 
  /*
   * Create a Send-Document request...
   */
 
-  if ((request = ippNewRequest(IPP_SEND_DOCUMENT)) == NULL)
+  if ((request = ippNewRequest(IPP_OP_SEND_DOCUMENT)) == NULL)
   {
-    _cupsSetError(IPP_INTERNAL_ERROR, strerror(ENOMEM), 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(ENOMEM), 0);
     DEBUG_puts("1cupsStartDestDocument: Unable to create Send-Document "
                "request.");
-    return (HTTP_ERROR);
+    return (HTTP_STATUS_ERROR);
   }
+
+  ippSetVersion(request, info->version / 10, info->version % 10);
 
   ippAddString(request, IPP_TAG_OPERATION, IPP_TAG_URI, "printer-uri",
                NULL, info->uri);
@@ -337,8 +342,9 @@ cupsStartDestDocument(
   if (format)
     ippAddString(request, IPP_TAG_OPERATION, IPP_TAG_MIMETYPE,
                  "document-format", NULL, format);
-  ippAddBoolean(request, IPP_TAG_OPERATION, "last-document", last_document);
+  ippAddBoolean(request, IPP_TAG_OPERATION, "last-document", (char)last_document);
 
+  cupsEncodeOptions2(request, num_options, options, IPP_TAG_OPERATION);
   cupsEncodeOptions2(request, num_options, options, IPP_TAG_DOCUMENT);
 
  /*
@@ -351,8 +357,3 @@ cupsStartDestDocument(
 
   return (status);
 }
-
-
-/*
- * End of "$Id: dest-job.c 3833 2012-05-23 22:51:18Z msweet $".
- */

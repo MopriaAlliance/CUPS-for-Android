@@ -1,26 +1,13 @@
 /*
- * "$Id: commandtops.c 3794 2012-04-23 22:44:16Z msweet $"
+ * PostScript command filter for CUPS.
  *
- *   PostScript command filter for CUPS.
+ * Copyright 2008-2014 by Apple Inc.
  *
- *   Copyright 2008-2012 by Apple Inc.
- *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *
- * Contents:
- *
- *   main()                 - Process a CUPS command file.
- *   auto_configure()       - Automatically configure the printer using
- *                            PostScript query commands and/or SNMP lookups.
- *   begin_ps()             - Send the standard PostScript prolog.
- *   end_ps()               - Send the standard PostScript trailer.
- *   print_self_test_page() - Print a self-test page.
- *   report_levels()        - Report supply levels.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  */
 
 /*
@@ -309,9 +296,7 @@ auto_configure(ppd_file_t *ppd,		/* I - PPD file */
 
     bufptr    = buffer;
     buffer[0] = '\0';
-    while ((bytes = cupsBackChannelRead(bufptr,
-					sizeof(buffer) - (bufptr - buffer) - 1,
-					10.0)) > 0)
+    while ((bytes = cupsBackChannelRead(bufptr, sizeof(buffer) - (size_t)(bufptr - buffer) - 1, 10.0)) > 0)
     {
      /*
       * No newline at the end? Go on reading ...
@@ -531,8 +516,3 @@ report_levels(ppd_file_t *ppd,		/* I - PPD file */
 
   end_ps(ppd);
 }
-
-
-/*
- * End of "$Id: commandtops.c 3794 2012-04-23 22:44:16Z msweet $".
- */

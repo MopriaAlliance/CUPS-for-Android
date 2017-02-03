@@ -1,29 +1,16 @@
 /*
- * "$Id: adminutil.c 7850 2008-08-20 00:07:25Z mike $"
+ * Administration utility API definitions for CUPS.
  *
- *   Administration utility API definitions for CUPS.
+ * Copyright 2007-2016 by Apple Inc.
+ * Copyright 2001-2007 by Easy Software Products.
  *
- *   Copyright 2007-2012 by Apple Inc.
- *   Copyright 2001-2007 by Easy Software Products.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   cupsAdminCreateWindowsPPD()  - Create the Windows PPD file for a printer.
- *   cupsAdminExportSamba()       - Export a printer to Samba.
- *   cupsAdminGetServerSettings() - Get settings from the server.
- *   cupsAdminSetServerSettings() - Set settings on the server.
- *   do_samba_command()           - Do a SAMBA command.
- *   get_cupsd_conf()             - Get the current cupsd.conf file.
- *   invalidate_cupsd_cache()     - Invalidate the cached cupsd.conf settings.
- *   write_option()               - Write a CUPS option to a PPD file.
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -31,6 +18,7 @@
  */
 
 #include "cups-private.h"
+#include "ppd.h"
 #include "adminutil.h"
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -52,7 +40,7 @@ static int		do_samba_command(const char *command,
 					 FILE *logfile);
 static http_status_t	get_cupsd_conf(http_t *http, _cups_globals_t *cg,
 			               time_t last_update, char *name,
-				       int namelen, int *remote);
+				       size_t namelen, int *remote);
 static void		invalidate_cupsd_cache(_cups_globals_t *cg);
 static void		write_option(cups_file_t *dstfp, int order,
 			             const char *name, const char *text,
@@ -129,7 +117,7 @@ cupsAdminCreateWindowsPPD(
   * Get the supported banner pages, etc. for the printer...
   */
 
-  request = ippNewRequest(IPP_GET_PRINTER_ATTRIBUTES);
+  request = ippNewRequest(IPP_OP_GET_PRINTER_ATTRIBUTES);
 
   httpAssembleURIf(HTTP_URI_CODING_ALL, uri, sizeof(uri), "ipp", NULL,
                    "localhost", 0, "/printers/%s", dest);
@@ -145,7 +133,7 @@ cupsAdminCreateWindowsPPD(
   */
 
   response = cupsDoRequest(http, request, "/");
-  if (!response || cupsLastError() > IPP_OK_CONFLICT)
+  if (!response || cupsLastError() > IPP_STATUS_OK_CONFLICTING)
   {
     unlink(src);
     return (NULL);
@@ -253,7 +241,7 @@ cupsAdminCreateWindowsPPD(
         snprintf(line, sizeof(line),
 	         _cupsLangString(language, _("Missing value on line %d.")),
 		 linenum);
-        _cupsSetError(IPP_DOCUMENT_FORMAT_ERROR, line, 0);
+        _cupsSetError(IPP_STATUS_ERROR_DOCUMENT_FORMAT_ERROR, line, 0);
 
         cupsFileClose(srcfp);
         cupsFileClose(dstfp);
@@ -272,7 +260,7 @@ cupsAdminCreateWindowsPPD(
 	         _cupsLangString(language,
 		                 _("Missing double quote on line %d.")),
 	         linenum);
-        _cupsSetError(IPP_DOCUMENT_FORMAT_ERROR, line, 0);
+        _cupsSetError(IPP_STATUS_ERROR_DOCUMENT_FORMAT_ERROR, line, 0);
 
         cupsFileClose(srcfp);
         cupsFileClose(dstfp);
@@ -291,7 +279,7 @@ cupsAdminCreateWindowsPPD(
 	         _cupsLangString(language,
 		                 _("Bad option + choice on line %d.")),
 	         linenum);
-        _cupsSetError(IPP_DOCUMENT_FORMAT_ERROR, line, 0);
+        _cupsSetError(IPP_STATUS_ERROR_DOCUMENT_FORMAT_ERROR, line, 0);
 
         cupsFileClose(srcfp);
         cupsFileClose(dstfp);
@@ -319,7 +307,7 @@ cupsAdminCreateWindowsPPD(
 	}
       }
 
-      snprintf(ptr + 1, sizeof(line) - (ptr - line + 1),
+      snprintf(ptr + 1, sizeof(line) - (size_t)(ptr - line + 1),
                "%%cupsJobTicket: %s=%s\n\"\n*End", option, choice);
 
       cupsFilePrintf(dstfp, "*%% Changed for CUPS Windows Driver...\n%s\n",
@@ -334,7 +322,7 @@ cupsAdminCreateWindowsPPD(
 
   if (linenum == 0)
   {
-    _cupsSetError(IPP_DOCUMENT_FORMAT_ERROR, _("Empty PPD file."), 1);
+    _cupsSetError(IPP_STATUS_ERROR_DOCUMENT_FORMAT_ERROR, _("Empty PPD file."), 1);
 
     cupsFileClose(dstfp);
     unlink(buffer);
@@ -424,7 +412,7 @@ cupsAdminExportSamba(
 
   if (!dest || !ppd || !samba_server || !samba_user || !samba_password)
   {
-    _cupsSetError(IPP_INTERNAL_ERROR, strerror(EINVAL), 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(EINVAL), 0);
     return (0);
   }
 
@@ -434,7 +422,7 @@ cupsAdminExportSamba(
 
   if ((fp = cupsTempFile2(authfile, sizeof(authfile))) == NULL)
   {
-    _cupsSetError(IPP_INTERNAL_ERROR, NULL, 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, NULL, 0);
     return (0);
   }
 
@@ -487,7 +475,7 @@ cupsAdminExportSamba(
 	                       _("Unable to copy Windows 2000 printer "
 	                         "driver files (%d).")), status);
 
-      _cupsSetError(IPP_INTERNAL_ERROR, message, 0);
+      _cupsSetError(IPP_STATUS_ERROR_INTERNAL, message, 0);
 
       if (logfile)
 	_cupsLangPuts(logfile, message);
@@ -522,7 +510,7 @@ cupsAdminExportSamba(
 	                         _("Unable to copy CUPS printer driver "
 				   "files (%d).")), status);
 
-	_cupsSetError(IPP_INTERNAL_ERROR, message, 0);
+	_cupsSetError(IPP_STATUS_ERROR_INTERNAL, message, 0);
 
 	if (logfile)
 	  _cupsLangPuts(logfile, message);
@@ -565,7 +553,7 @@ cupsAdminExportSamba(
                 	       _("Unable to install Windows 2000 printer "
 		        	 "driver files (%d).")), status);
 
-      _cupsSetError(IPP_INTERNAL_ERROR, message, 0);
+      _cupsSetError(IPP_STATUS_ERROR_INTERNAL, message, 0);
 
       if (logfile)
 	_cupsLangPuts(logfile, message);
@@ -610,7 +598,7 @@ cupsAdminExportSamba(
                 	       _("Unable to copy Windows 9x printer "
 		        	 "driver files (%d).")), status);
 
-      _cupsSetError(IPP_INTERNAL_ERROR, message, 0);
+      _cupsSetError(IPP_STATUS_ERROR_INTERNAL, message, 0);
 
       if (logfile)
 	_cupsLangPuts(logfile, message);
@@ -639,7 +627,7 @@ cupsAdminExportSamba(
                 	       _("Unable to install Windows 9x printer "
 		        	 "driver files (%d).")), status);
 
-      _cupsSetError(IPP_INTERNAL_ERROR, message, 0);
+      _cupsSetError(IPP_STATUS_ERROR_INTERNAL, message, 0);
 
       if (logfile)
 	_cupsLangPuts(logfile, message);
@@ -691,7 +679,7 @@ cupsAdminExportSamba(
 	                       _("Unable to copy 64-bit Windows printer "
 	                         "driver files (%d).")), status);
 
-      _cupsSetError(IPP_INTERNAL_ERROR, message, 0);
+      _cupsSetError(IPP_STATUS_ERROR_INTERNAL, message, 0);
 
       if (logfile)
 	_cupsLangPuts(logfile, message);
@@ -726,7 +714,7 @@ cupsAdminExportSamba(
 	                         _("Unable to copy 64-bit CUPS printer driver "
 				   "files (%d).")), status);
 
-	_cupsSetError(IPP_INTERNAL_ERROR, message, 0);
+	_cupsSetError(IPP_STATUS_ERROR_INTERNAL, message, 0);
 
 	if (logfile)
 	  _cupsLangPuts(logfile, message);
@@ -769,7 +757,7 @@ cupsAdminExportSamba(
                 	       _("Unable to install Windows 2000 printer "
 		        	 "driver files (%d).")), status);
 
-      _cupsSetError(IPP_INTERNAL_ERROR, message, 0);
+      _cupsSetError(IPP_STATUS_ERROR_INTERNAL, message, 0);
 
       if (logfile)
 	_cupsLangPuts(logfile, message);
@@ -794,13 +782,13 @@ cupsAdminExportSamba(
 				"are installed.")),
               sizeof(message));
 
-    _cupsSetError(IPP_NOT_FOUND, message, 0);
+    _cupsSetError(IPP_STATUS_ERROR_NOT_FOUND, message, 0);
     _cupsLangPuts(logfile, message);
   }
 
   if (have_drivers == 0)
   {
-    _cupsSetError(IPP_NOT_FOUND, message, 0);
+    _cupsSetError(IPP_STATUS_ERROR_NOT_FOUND, message, 0);
 
     unlink(authfile);
 
@@ -821,7 +809,7 @@ cupsAdminExportSamba(
         		     _("Unable to set Windows printer driver (%d).")),
         		     status);
 
-    _cupsSetError(IPP_INTERNAL_ERROR, message, 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, message, 0);
 
     if (logfile)
       _cupsLangPuts(logfile, message);
@@ -843,7 +831,7 @@ cupsAdminExportSamba(
  * The returned settings should be freed with cupsFreeOptions() when
  * you are done with them.
  *
- * @since CUPS 1.3/OS X 10.5@
+ * @since CUPS 1.3/macOS 10.5@
  */
 
 int					/* O - 1 on success, 0 on failure */
@@ -882,9 +870,9 @@ cupsAdminGetServerSettings(
       */
 
       if (strcmp(cg->http->hostname, cg->server) ||
-          cg->ipp_port != _httpAddrPort(cg->http->hostaddr) ||
+          cg->ipp_port != httpAddrPort(cg->http->hostaddr) ||
 	  (cg->http->encryption != cg->encryption &&
-	   cg->http->encryption == HTTP_ENCRYPT_NEVER))
+	   cg->http->encryption == HTTP_ENCRYPTION_NEVER))
       {
        /*
 	* Need to close the current connection because something has changed...
@@ -901,13 +889,13 @@ cupsAdminGetServerSettings(
 
     if (!cg->http)
     {
-      if ((cg->http = _httpCreate(cupsServer(), ippPort(), NULL,
-                                  cupsEncryption(), AF_UNSPEC)) == NULL)
+      if ((cg->http = httpConnect2(cupsServer(), ippPort(), NULL, AF_UNSPEC,
+                                   cupsEncryption(), 1, 0, NULL)) == NULL)
       {
 	if (errno)
-	  _cupsSetError(IPP_SERVICE_UNAVAILABLE, NULL, 0);
+	  _cupsSetError(IPP_STATUS_ERROR_SERVICE_UNAVAILABLE, NULL, 0);
 	else
-	  _cupsSetError(IPP_SERVICE_UNAVAILABLE,
+	  _cupsSetError(IPP_STATUS_ERROR_SERVICE_UNAVAILABLE,
 			_("Unable to connect to host."), 1);
 
 	if (num_settings)
@@ -925,7 +913,7 @@ cupsAdminGetServerSettings(
 
   if (!http || !num_settings || !settings)
   {
-    _cupsSetError(IPP_INTERNAL_ERROR, strerror(EINVAL), 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(EINVAL), 0);
 
     if (num_settings)
       *num_settings = 0;
@@ -944,7 +932,7 @@ cupsAdminGetServerSettings(
   */
 
   if ((status = get_cupsd_conf(http, cg, cg->cupsd_update, cupsdconf,
-                               sizeof(cupsdconf), &remote)) == HTTP_OK)
+                               sizeof(cupsdconf), &remote)) == HTTP_STATUS_OK)
   {
     if ((cupsd = cupsFileOpen(cupsdconf, "r")) == NULL)
     {
@@ -954,7 +942,7 @@ cupsAdminGetServerSettings(
       snprintf(message, sizeof(message),
                _cupsLangString(cupsLangDefault(), _("Open of %s failed: %s")),
                cupsdconf, strerror(errno));
-      _cupsSetError(IPP_INTERNAL_ERROR, message, 0);
+      _cupsSetError(IPP_STATUS_ERROR_INTERNAL, message, 0);
     }
   }
   else
@@ -1136,7 +1124,7 @@ cupsAdminGetServerSettings(
 					   cg->cupsd_num_settings,
 					   &(cg->cupsd_settings));
   }
-  else if (status != HTTP_NOT_MODIFIED)
+  else if (status != HTTP_STATUS_NOT_MODIFIED)
     invalidate_cupsd_cache(cg);
 
  /*
@@ -1159,7 +1147,7 @@ cupsAdminGetServerSettings(
 /*
  * 'cupsAdminSetServerSettings()' - Set settings on the server.
  *
- * @since CUPS 1.3/OS X 10.5@
+ * @since CUPS 1.3/macOS 10.5@
  */
 
 int					/* O - 1 on success, 0 on failure */
@@ -1186,6 +1174,7 @@ cupsAdminSetServerSettings(
 		in_cancel_job,		/* In a cancel-job section? */
 		in_admin_location,	/* In the /admin location? */
 		in_conf_location,	/* In the /admin/conf location? */
+		in_log_location,	/* In the /admin/log location? */
 		in_root_location;	/* In the / location? */
   const char	*val;			/* Setting value */
   int		share_printers,		/* Share local printers */
@@ -1199,11 +1188,13 @@ cupsAdminSetServerSettings(
 		wrote_loglevel,		/* Wrote the LogLevel line? */
 		wrote_admin_location,	/* Wrote the /admin location? */
 		wrote_conf_location,	/* Wrote the /admin/conf location? */
+		wrote_log_location,	/* Wrote the /admin/log location? */
 		wrote_root_location;	/* Wrote the / location? */
   int		indent;			/* Indentation */
   int		cupsd_num_settings;	/* New number of settings */
   int		old_share_printers,	/* Share local printers */
 		old_remote_admin,	/* Remote administration allowed? */
+		old_remote_any,		/* Remote access from anywhere? */
 		old_user_cancel_any,	/* Cancel-job policy set? */
 		old_debug_logging;	/* LogLevel debug set? */
   cups_option_t	*cupsd_settings,	/* New settings */
@@ -1220,7 +1211,7 @@ cupsAdminSetServerSettings(
 
   if (!http || !num_settings || !settings)
   {
-    _cupsSetError(IPP_INTERNAL_ERROR, strerror(EINVAL), 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(EINVAL), 0);
 
     return (0);
   }
@@ -1230,11 +1221,11 @@ cupsAdminSetServerSettings(
   */
 
   if (get_cupsd_conf(http, cg, 0, cupsdconf, sizeof(cupsdconf),
-                     &remote) == HTTP_OK)
+                     &remote) == HTTP_STATUS_OK)
   {
     if ((cupsd = cupsFileOpen(cupsdconf, "r")) == NULL)
     {
-      _cupsSetError(IPP_INTERNAL_ERROR, NULL, 0);
+      _cupsSetError(IPP_STATUS_ERROR_INTERNAL, NULL, 0);
       return (0);
     }
   }
@@ -1269,12 +1260,12 @@ cupsAdminSetServerSettings(
 
   if ((val = cupsGetOption(CUPS_SERVER_REMOTE_ANY, cupsd_num_settings,
                            cupsd_settings)) != NULL)
-    remote_any = atoi(val);
+    old_remote_any = atoi(val);
   else
-    remote_any = 0;
+    old_remote_any = 0;
 
   DEBUG_printf(("1cupsAdminSetServerSettings: old remote_any=%d",
-                remote_any));
+                old_remote_any));
 
   if ((val = cupsGetOption(CUPS_SERVER_SHARE_PRINTERS, cupsd_num_settings,
                            cupsd_settings)) != NULL)
@@ -1320,12 +1311,23 @@ cupsAdminSetServerSettings(
   DEBUG_printf(("1cupsAdminSetServerSettings: debug_logging=%d",
                 debug_logging));
 
-  if ((val = cupsGetOption(CUPS_SERVER_REMOTE_ANY, num_settings,
-                           settings)) != NULL)
+  if ((val = cupsGetOption(CUPS_SERVER_REMOTE_ANY, num_settings, settings)) != NULL)
+  {
     remote_any = atoi(val);
 
-  DEBUG_printf(("1cupsAdminSetServerSettings: remote_any=%d",
-                remote_any));
+    if (remote_any == old_remote_any)
+    {
+     /*
+      * No change to this setting...
+      */
+
+      remote_any = -1;
+    }
+  }
+  else
+    remote_any = -1;
+
+  DEBUG_printf(("1cupsAdminSetServerSettings: remote_any=%d", remote_any));
 
   if ((val = cupsGetOption(CUPS_SERVER_REMOTE_ADMIN, num_settings,
                            settings)) != NULL)
@@ -1398,7 +1400,7 @@ cupsAdminSetServerSettings(
     if (remote)
       unlink(cupsdconf);
 
-    _cupsSetError(IPP_INTERNAL_ERROR, NULL, 0);
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, NULL, 0);
     return (0);
   }
 
@@ -1412,12 +1414,14 @@ cupsAdminSetServerSettings(
   in_conf_location     = 0;
   in_default_policy    = 0;
   in_location          = 0;
+  in_log_location      = 0;
   in_policy            = 0;
   in_root_location     = 0;
   linenum              = 0;
   wrote_admin_location = 0;
   wrote_browsing       = 0;
   wrote_conf_location  = 0;
+  wrote_log_location   = 0;
   wrote_loglevel       = 0;
   wrote_policy         = 0;
   wrote_port_listen    = 0;
@@ -1438,7 +1442,7 @@ cupsAdminSetServerSettings(
   while (cupsFileGetConf(cupsd, line, sizeof(line), &value, &linenum))
   {
     if ((!_cups_strcasecmp(line, "Port") || !_cups_strcasecmp(line, "Listen")) &&
-        (remote_admin >= 0 || remote_any > 0 || share_printers >= 0))
+        (remote_admin >= 0 || remote_any >= 0 || share_printers >= 0))
     {
       if (!wrote_port_listen)
       {
@@ -1561,8 +1565,10 @@ cupsAdminSetServerSettings(
       indent += 2;
       if (!strcmp(value, "/admin"))
 	in_admin_location = 1;
-      if (!strcmp(value, "/admin/conf"))
+      else if (!strcmp(value, "/admin/conf"))
 	in_conf_location = 1;
+      else if (!strcmp(value, "/admin/log"))
+	in_log_location = 1;
       else if (!strcmp(value, "/"))
 	in_root_location = 1;
 
@@ -1604,8 +1610,25 @@ cupsAdminSetServerSettings(
 	  cupsFilePrintf(temp, "  Allow %s\n",
 	                 remote_any > 0 ? "all" : "@LOCAL");
       }
+      else if (in_log_location && remote_admin >= 0)
+      {
+	wrote_log_location = 1;
+
+	if (remote_admin)
+          cupsFilePuts(temp, "  # Allow remote access to the log "
+	                     "files...\n");
+	else
+          cupsFilePuts(temp, "  # Restrict access to the log "
+	                     "files...\n");
+
+        cupsFilePuts(temp, "  Order allow,deny\n");
+
+	if (remote_admin)
+	  cupsFilePrintf(temp, "  Allow %s\n",
+	                 remote_any > 0 ? "all" : "@LOCAL");
+      }
       else if (in_root_location &&
-               (remote_admin >= 0 || remote_any > 0 || share_printers >= 0))
+               (remote_admin >= 0 || remote_any >= 0 || share_printers >= 0))
       {
 	wrote_root_location = 1;
 
@@ -1630,6 +1653,7 @@ cupsAdminSetServerSettings(
 
       in_admin_location = 0;
       in_conf_location  = 0;
+      in_log_location   = 0;
       in_root_location  = 0;
 
       cupsFilePuts(temp, "</Location>\n");
@@ -1707,7 +1731,7 @@ cupsAdminSetServerSettings(
       in_cancel_job = 0;
     }
     else if ((((in_admin_location || in_conf_location || in_root_location) &&
-               (remote_admin >= 0 || remote_any > 0)) ||
+               (remote_admin >= 0 || remote_any >= 0)) ||
               (in_root_location && share_printers >= 0)) &&
              (!_cups_strcasecmp(line, "Allow") || !_cups_strcasecmp(line, "Deny") ||
 	      !_cups_strcasecmp(line, "Order")))
@@ -1799,7 +1823,7 @@ cupsAdminSetServerSettings(
   }
 
   if (!wrote_port_listen &&
-      (remote_admin >= 0 || remote_any > 0 || share_printers >= 0))
+      (remote_admin >= 0 || remote_any >= 0 || share_printers >= 0))
   {
     if (remote_admin > 0 || remote_any > 0 || share_printers > 0)
     {
@@ -1820,7 +1844,7 @@ cupsAdminSetServerSettings(
   }
 
   if (!wrote_root_location &&
-      (remote_admin >= 0 || remote_any > 0 || share_printers >= 0))
+      (remote_admin >= 0 || remote_any >= 0 || share_printers >= 0))
   {
     if (remote_admin > 0 && share_printers > 0)
       cupsFilePuts(temp,
@@ -1868,6 +1892,25 @@ cupsAdminSetServerSettings(
       cupsFilePuts(temp, "# Restrict access to the configuration files...\n");
 
     cupsFilePuts(temp, "<Location /admin/conf>\n"
+                       "  AuthType Default\n"
+                       "  Require user @SYSTEM\n"
+                       "  Order allow,deny\n");
+
+    if (remote_admin)
+      cupsFilePrintf(temp, "  Allow %s\n", remote_any > 0 ? "all" : "@LOCAL");
+
+    cupsFilePuts(temp, "</Location>\n");
+  }
+
+  if (!wrote_log_location && remote_admin >= 0)
+  {
+    if (remote_admin)
+      cupsFilePuts(temp,
+                   "# Allow remote access to the log files...\n");
+    else
+      cupsFilePuts(temp, "# Restrict access to the log files...\n");
+
+    cupsFilePuts(temp, "<Location /admin/log>\n"
                        "  AuthType Default\n"
                        "  Require user @SYSTEM\n"
                        "  Order allow,deny\n");
@@ -1954,7 +1997,7 @@ cupsAdminSetServerSettings(
 
   status = cupsPutFile(http, "/admin/conf/cupsd.conf", tempfile);
 
-  if (status == HTTP_CREATED)
+  if (status == HTTP_STATUS_CREATED)
   {
    /*
     * Updated OK, add the basic settings...
@@ -1978,9 +2021,14 @@ cupsAdminSetServerSettings(
                                 	 old_remote_admin ? "1" : "0",
 					 cupsd_num_settings, &cupsd_settings);
 
-    cupsd_num_settings = cupsAddOption(CUPS_SERVER_REMOTE_ANY,
-                                       remote_any ? "1" : "0",
-				       cupsd_num_settings, &cupsd_settings);
+    if (remote_any >= 0)
+      cupsd_num_settings = cupsAddOption(CUPS_SERVER_REMOTE_ANY,
+					 remote_any ? "1" : "0",
+					 cupsd_num_settings, &cupsd_settings);
+    else
+      cupsd_num_settings = cupsAddOption(CUPS_SERVER_REMOTE_ANY,
+					 old_remote_any ? "1" : "0",
+					 cupsd_num_settings, &cupsd_settings);
 
     if (share_printers >= 0)
       cupsd_num_settings = cupsAddOption(CUPS_SERVER_SHARE_PRINTERS,
@@ -2024,7 +2072,7 @@ cupsAdminSetServerSettings(
 
   unlink(tempfile);
 
-  return (status == HTTP_CREATED);
+  return (status == HTTP_STATUS_CREATED);
 }
 
 
@@ -2120,7 +2168,7 @@ get_cupsd_conf(
     _cups_globals_t *cg,		/* I - Global data */
     time_t          last_update,	/* I - Last update time for file */
     char            *name,		/* I - Filename buffer */
-    int             namesize,		/* I - Size of filename buffer */
+    size_t          namesize,		/* I - Size of filename buffer */
     int             *remote)		/* O - Remote file? */
 {
   int		fd;			/* Temporary file descriptor */
@@ -2158,16 +2206,16 @@ get_cupsd_conf(
       snprintf(message, sizeof(message),
                _cupsLangString(cupsLangDefault(), _("stat of %s failed: %s")),
                name, strerror(errno));
-      _cupsSetError(IPP_INTERNAL_ERROR, message, 0);
+      _cupsSetError(IPP_STATUS_ERROR_INTERNAL, message, 0);
 
       *name = '\0';
 
-      return (HTTP_SERVER_ERROR);
+      return (HTTP_STATUS_SERVER_ERROR);
     }
     else if (last_update && info.st_mtime <= last_update)
-      status = HTTP_NOT_MODIFIED;
+      status = HTTP_STATUS_NOT_MODIFIED;
     else
-      status = HTTP_OK;
+      status = HTTP_STATUS_OK;
   }
   else
 #endif /* !WIN32 */
@@ -2176,15 +2224,15 @@ get_cupsd_conf(
     * Read cupsd.conf via a HTTP GET request...
     */
 
-    if ((fd = cupsTempFd(name, namesize)) < 0)
+    if ((fd = cupsTempFd(name, (int)namesize)) < 0)
     {
       *name = '\0';
 
-      _cupsSetError(IPP_INTERNAL_ERROR, NULL, 0);
+      _cupsSetError(IPP_STATUS_ERROR_INTERNAL, NULL, 0);
 
       invalidate_cupsd_cache(cg);
 
-      return (HTTP_SERVER_ERROR);
+      return (HTTP_STATUS_SERVER_ERROR);
     }
 
     *remote = 1;
@@ -2199,7 +2247,7 @@ get_cupsd_conf(
 
     close(fd);
 
-    if (status != HTTP_OK)
+    if (status != HTTP_STATUS_OK)
     {
       unlink(name);
       *name = '\0';
@@ -2334,8 +2382,3 @@ write_option(cups_file_t     *dstfp,	/* I - PPD file */
 
   cupsFilePrintf(dstfp, "*JCLCloseUI: *%s\n\n", name);
 }
-
-
-/*
- * End of "$Id: adminutil.c 7850 2008-08-20 00:07:25Z mike $".
- */

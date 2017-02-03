@@ -1,32 +1,19 @@
 /*
- * "$Id: auth.c 7720 2008-07-11 22:46:21Z mike $"
+ * Authentication functions for CUPS.
  *
- *   Authentication functions for CUPS.
+ * Copyright 2007-2014 by Apple Inc.
+ * Copyright 1997-2007 by Easy Software Products.
  *
- *   Copyright 2007-2013 by Apple Inc.
- *   Copyright 1997-2007 by Easy Software Products.
+ * This file contains Kerberos support code, copyright 2006 by
+ * Jelmer Vernooij.
  *
- *   This file contains Kerberos support code, copyright 2006 by
- *   Jelmer Vernooij.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   cupsDoAuthentication()        - Authenticate a request.
- *   _cupsSetNegotiateAuthString() - Set the Kerberos authentication string.
- *   cups_gss_acquire()            - Kerberos credentials callback.
- *   cups_gss_getname()            - Get CUPS service credentials for
- *                                   authentication.
- *   cups_gss_printf()             - Show debug error messages from GSSAPI.
- *   cups_local_auth()             - Get the local authorization certificate if
- *                                   available/applicable.
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -112,10 +99,10 @@ static int	cups_local_auth(http_t *http);
 /*
  * 'cupsDoAuthentication()' - Authenticate a request.
  *
- * This function should be called in response to a @code HTTP_UNAUTHORIZED@
+ * This function should be called in response to a @code HTTP_STATUS_UNAUTHORIZED@
  * status, prior to resubmitting your request.
  *
- * @since CUPS 1.1.20/OS X 10.4@
+ * @since CUPS 1.1.20/macOS 10.4@
  */
 
 int					/* O - 0 on success, -1 on error */
@@ -133,8 +120,7 @@ cupsDoAuthentication(
   _cups_globals_t *cg;			/* Global data */
 
 
-  DEBUG_printf(("cupsDoAuthentication(http=%p, method=\"%s\", resource=\"%s\")",
-                http, method, resource));
+  DEBUG_printf(("cupsDoAuthentication(http=%p, method=\"%s\", resource=\"%s\")", (void *)http, method, resource));
 
   if (!http)
     http = _cupsConnect();
@@ -164,14 +150,14 @@ cupsDoAuthentication(
       DEBUG_printf(("2cupsDoAuthentication: authstring=\"%s\"",
                     http->authstring));
 
-      if (http->status == HTTP_UNAUTHORIZED)
+      if (http->status == HTTP_STATUS_UNAUTHORIZED)
 	http->digest_tries ++;
 
       return (0);
     }
     else if (localauth == -1)
     {
-      http->status = HTTP_AUTHORIZATION_CANCELED;
+      http->status = HTTP_STATUS_CUPS_AUTHORIZATION_CANCELED;
       return (-1);			/* Error or canceled */
     }
   }
@@ -190,10 +176,17 @@ cupsDoAuthentication(
     * Nope - get a new password from the user...
     */
 
+    char default_username[HTTP_MAX_VALUE];
+					/* Default username */
+
     cg = _cupsGlobals();
 
     if (!cg->lang_default)
       cg->lang_default = cupsLangDefault();
+
+    if (httpGetSubField(http, HTTP_FIELD_WWW_AUTHENTICATE, "username",
+                        default_username))
+      cupsSetUser(default_username);
 
     snprintf(prompt, sizeof(prompt),
              _cupsLangString(cg->lang_default, _("Password for %s on %s? ")),
@@ -205,22 +198,22 @@ cupsDoAuthentication(
 
     if ((password = cupsGetPassword2(prompt, http, method, resource)) == NULL)
     {
-      http->status = HTTP_AUTHORIZATION_CANCELED;
+      http->status = HTTP_STATUS_CUPS_AUTHORIZATION_CANCELED;
       return (-1);
     }
 
     snprintf(http->userpass, sizeof(http->userpass), "%s:%s", cupsUser(),
              password);
   }
-  else if (http->status == HTTP_UNAUTHORIZED)
+  else if (http->status == HTTP_STATUS_UNAUTHORIZED)
     http->digest_tries ++;
 
-  if (http->status == HTTP_UNAUTHORIZED && http->digest_tries >= 3)
+  if (http->status == HTTP_STATUS_UNAUTHORIZED && http->digest_tries >= 3)
   {
     DEBUG_printf(("1cupsDoAuthentication: Too many authentication tries (%d)",
 		  http->digest_tries));
 
-    http->status = HTTP_AUTHORIZATION_CANCELED;
+    http->status = HTTP_STATUS_CUPS_AUTHORIZATION_CANCELED;
     return (-1);
   }
 
@@ -237,7 +230,7 @@ cupsDoAuthentication(
 
     if (_cupsSetNegotiateAuthString(http, method, resource))
     {
-      http->status = HTTP_AUTHORIZATION_CANCELED;
+      http->status = HTTP_STATUS_CUPS_AUTHORIZATION_CANCELED;
       return (-1);
     }
   }
@@ -265,7 +258,6 @@ cupsDoAuthentication(
     char	encode[33],		/* MD5 buffer */
 		digest[1024];		/* Digest auth data */
 
-
     httpGetSubField(http, HTTP_FIELD_WWW_AUTHENTICATE, "realm", realm);
     httpGetSubField(http, HTTP_FIELD_WWW_AUTHENTICATE, "nonce", nonce);
 
@@ -280,7 +272,7 @@ cupsDoAuthentication(
   {
     DEBUG_printf(("1cupsDoAuthentication: Unknown auth type: \"%s\"",
                   www_auth));
-    http->status = HTTP_AUTHORIZATION_CANCELED;
+    http->status = HTTP_STATUS_CUPS_AUTHORIZATION_CANCELED;
     return (-1);
   }
 
@@ -316,7 +308,7 @@ _cupsSetNegotiateAuthString(
   * to use it...
   */
 
-  if (gss_init_sec_context == NULL)
+  if (&gss_init_sec_context == NULL)
   {
     DEBUG_puts("1_cupsSetNegotiateAuthString: Weak-linked GSSAPI/Kerberos "
                "framework is not present");
@@ -446,21 +438,21 @@ _cupsSetNegotiateAuthString(
     * arbitrarily large credentials...
     */
 
-    int authsize = 10 +				/* "Negotiate " */
-		   output_token.length * 4 / 3 + 1 +	/* Base64 */
-		   1;					/* nul */
+    int authsize = 10 +			/* "Negotiate " */
+		   (int)output_token.length * 4 / 3 + 1 + 1;
+		   			/* Base64 + nul */
 
     httpSetAuthString(http, NULL, NULL);
 
-    if ((http->authstring = malloc(authsize)) == NULL)
+    if ((http->authstring = malloc((size_t)authsize)) == NULL)
     {
       http->authstring = http->_authstring;
       authsize         = sizeof(http->_authstring);
     }
 
-    strcpy(http->authstring, "Negotiate ");
+    strlcpy(http->authstring, "Negotiate ", (size_t)authsize);
     httpEncode64_2(http->authstring + 10, authsize - 10, output_token.value,
-		   output_token.length);
+		   (int)output_token.length);
 
     gss_release_buffer(&minor_status, &output_token);
   }
@@ -673,8 +665,7 @@ cups_local_auth(http_t *http)		/* I - HTTP connection to server */
 #  endif /* HAVE_AUTHORIZATION_H */
 
 
-  DEBUG_printf(("7cups_local_auth(http=%p) hostaddr=%s, hostname=\"%s\"",
-                http, httpAddrString(http->hostaddr, filename, sizeof(filename)), http->hostname));
+  DEBUG_printf(("7cups_local_auth(http=%p) hostaddr=%s, hostname=\"%s\"", (void *)http, httpAddrString(http->hostaddr, filename, sizeof(filename)), http->hostname));
 
  /*
   * See if we are accessing localhost...
@@ -766,7 +757,7 @@ cups_local_auth(http_t *http)		/* I - HTTP connection to server */
 
   if (
 #    ifdef HAVE_GSSAPI
-      strncmp(http->fields[HTTP_FIELD_WWW_AUTHENTICATE], "Negotiate", 9) &&
+      _cups_strncasecmp(http->fields[HTTP_FIELD_WWW_AUTHENTICATE], "Negotiate", 9) &&
 #    endif /* HAVE_GSSAPI */
 #    ifdef HAVE_AUTHORIZATION_H
       !httpGetSubField2(http, HTTP_FIELD_WWW_AUTHENTICATE, "authkey",
@@ -813,7 +804,7 @@ cups_local_auth(http_t *http)		/* I - HTTP connection to server */
                   filename, strerror(errno)));
 
 #  ifdef HAVE_GSSAPI
-    if (!strncmp(http->fields[HTTP_FIELD_WWW_AUTHENTICATE], "Negotiate", 9))
+    if (!_cups_strncasecmp(http->fields[HTTP_FIELD_WWW_AUTHENTICATE], "Negotiate", 9))
     {
      /*
       * Kerberos required, don't try the root certificate...
@@ -878,8 +869,3 @@ cups_local_auth(http_t *http)		/* I - HTTP connection to server */
   return (1);
 #endif /* WIN32 || __EMX__ */
 }
-
-
-/*
- * End of "$Id: auth.c 7720 2008-07-11 22:46:21Z mike $".
- */

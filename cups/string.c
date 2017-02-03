@@ -1,35 +1,16 @@
 /*
- * "$Id: string.c 7460 2008-04-16 02:19:54Z mike $"
+ * String functions for CUPS.
  *
- *   String functions for CUPS.
+ * Copyright 2007-2014 by Apple Inc.
+ * Copyright 1997-2007 by Easy Software Products.
  *
- *   Copyright 2007-2011 by Apple Inc.
- *   Copyright 1997-2007 by Easy Software Products.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   _cupsStrAlloc()      - Allocate/reference a string.
- *   _cupsStrFlush()      - Flush the string pool.
- *   _cupsStrFormatd()    - Format a floating-point number.
- *   _cupsStrFree()       - Free/dereference a string.
- *   _cupsStrRetain()     - Increment the reference count of a string.
- *   _cupsStrScand()      - Scan a string for a floating-point number.
- *   _cupsStrStatistics() - Return allocation statistics for string pool.
- *   _cups_strcpy()       - Copy a string allowing for overlapping strings.
- *   _cups_strdup()       - Duplicate a string.
- *   _cups_strcasecmp()   - Do a case-insensitive comparison.
- *   _cups_strncasecmp()  - Do a case-insensitive comparison on up to N chars.
- *   _cups_strlcat()      - Safely concatenate two strings.
- *   _cups_strlcpy()      - Safely copy two strings.
- *   compare_sp_items()   - Compare two string pool items...
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -37,10 +18,7 @@
  */
 
 #define _CUPS_STRING_C_
-#include "string-private.h"
-#include "debug-private.h"
-#include "thread-private.h"
-#include "array.h"
+#include "cups-private.h"
 #include <stddef.h>
 #include <limits.h>
 
@@ -69,6 +47,7 @@ static int	compare_sp_items(_cups_sp_item_t *a, _cups_sp_item_t *b);
 char *					/* O - String pointer */
 _cupsStrAlloc(const char *s)		/* I - String */
 {
+  size_t		slen;		/* Length of string */
   _cups_sp_item_t	*item,		/* String pool item */
 			*key;		/* Search key */
 
@@ -128,7 +107,8 @@ _cupsStrAlloc(const char *s)		/* I - String */
   * Not found, so allocate a new one...
   */
 
-  item = (_cups_sp_item_t *)calloc(1, sizeof(_cups_sp_item_t) + strlen(s));
+  slen = strlen(s);
+  item = (_cups_sp_item_t *)calloc(1, sizeof(_cups_sp_item_t) + slen);
   if (!item)
   {
     _cupsMutexUnlock(&sp_mutex);
@@ -137,7 +117,7 @@ _cupsStrAlloc(const char *s)		/* I - String */
   }
 
   item->ref_count = 1;
-  strcpy(item->str, s);
+  memcpy(item->str, s, slen + 1);
 
 #ifdef DEBUG_GUARDS
   item->guard = _CUPS_STR_GUARD;
@@ -156,6 +136,39 @@ _cupsStrAlloc(const char *s)		/* I - String */
   _cupsMutexUnlock(&sp_mutex);
 
   return (item->str);
+}
+
+
+/*
+ * '_cupsStrDate()' - Return a localized date for a given time value.
+ *
+ * This function works around the locale encoding issues of strftime...
+ */
+
+char *					/* O - Buffer */
+_cupsStrDate(char   *buf,		/* I - Buffer */
+             size_t bufsize,		/* I - Size of buffer */
+	     time_t timeval)		/* I - Time value */
+{
+  struct tm	*dateval;		/* Local date/time */
+  char		temp[1024];		/* Temporary buffer */
+  _cups_globals_t *cg = _cupsGlobals();	/* Per-thread globals */
+
+
+  if (!cg->lang_default)
+    cg->lang_default = cupsLangDefault();
+
+  dateval = localtime(&timeval);
+
+  if (cg->lang_default->encoding != CUPS_UTF8)
+  {
+    strftime(temp, sizeof(temp), "%c", dateval);
+    cupsCharsetToUTF8((cups_utf8_t *)buf, temp, (int)bufsize, cg->lang_default->encoding);
+  }
+  else
+    strftime(buf, bufsize, "%c", dateval);
+
+  return (buf);
 }
 
 
@@ -220,13 +233,13 @@ _cupsStrFormatd(char         *buf,	/* I - String */
 
 /* 07/22/2016 Mopria-notice: this causes "struct lconv has no member named 'decimal_point'"
 compilation error in Android so commenting out
-  if (loc && loc->decimal_point)
+   if (loc && loc->decimal_point)
   {
     dec    = loc->decimal_point;
     declen = (int)strlen(dec);
   }
   else
-*/
+  */
   {
     dec    = ".";
     declen = 1;
@@ -261,7 +274,7 @@ compilation error in Android so commenting out
   }
   else
   {
-    strlcpy(buf, temp, bufend - buf + 1);
+    strlcpy(buf, temp, (size_t)(bufend - buf + 1));
     bufptr = buf + strlen(buf);
   }
 
@@ -435,15 +448,15 @@ _cupsStrScand(const char   *buf,	/* I - Pointer to number */
 
     buf ++;
 
-/* 07/22/2016 Mopria-notice: this causes "struct lconv has no member named 'decimal_point'"
-compilation error in Android so commenting out
+/*    07/22/2016 Mopria-notice: this causes "struct lconv has no member named 'decimal_point'"
+      compilation error in Android so commenting out
     if (loc && loc->decimal_point)
     {
-      strlcpy(tempptr, loc->decimal_point, sizeof(temp) - (tempptr - temp));
+      strlcpy(tempptr, loc->decimal_point, sizeof(temp) - (size_t)(tempptr - temp));
       tempptr += strlen(tempptr);
     }
     else
-*/
+    */
     if (tempptr < (temp + sizeof(temp) - 1))
       *tempptr++ = '.';
     else
@@ -551,7 +564,7 @@ _cupsStrStatistics(size_t *alloc_bytes,	/* O - Allocated bytes */
     */
 
     count  += item->ref_count;
-    len    = (strlen(item->str) + 8) & ~7;
+    len    = (strlen(item->str) + 8) & (size_t)~7;
     abytes += sizeof(_cups_sp_item_t) + len;
     tbytes += item->ref_count * len;
   }
@@ -595,16 +608,18 @@ _cups_strcpy(char       *dst,		/* I - Destination string */
 char 	*				/* O - New string pointer */
 _cups_strdup(const char *s)		/* I - String to duplicate */
 {
-  char	*t;				/* New string pointer */
+  char		*t;			/* New string pointer */
+  size_t	slen;			/* Length of string */
 
 
-  if (s == NULL)
+  if (!s)
     return (NULL);
 
-  if ((t = malloc(strlen(s) + 1)) == NULL)
+  slen = strlen(s);
+  if ((t = malloc(slen + 1)) == NULL)
     return (NULL);
 
-  return (strcpy(t, s));
+  return (memcpy(t, s, slen + 1));
 }
 #endif /* !HAVE_STRDUP */
 
@@ -705,7 +720,7 @@ _cups_strlcat(char       *dst,		/* O - Destination string */
   if (srclen > size)
     srclen = size;
 
-  memcpy(dst + dstlen, src, srclen);
+  memmove(dst + dstlen, src, srclen);
   dst[dstlen + srclen] = '\0';
 
   return (dstlen + srclen);
@@ -741,7 +756,7 @@ _cups_strlcpy(char       *dst,		/* O - Destination string */
   if (srclen > size)
     srclen = size;
 
-  memcpy(dst, src, srclen);
+  memmove(dst, src, srclen);
   dst[srclen] = '\0';
 
   return (srclen);
@@ -759,8 +774,3 @@ compare_sp_items(_cups_sp_item_t *a,	/* I - First item */
 {
   return (strcmp(a->str, b->str));
 }
-
-
-/*
- * End of "$Id: string.c 7460 2008-04-16 02:19:54Z mike $".
- */

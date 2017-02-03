@@ -1,24 +1,16 @@
 /*
- * "$Id: backchannel.c 7616 2008-05-28 00:34:13Z mike $"
+ * Backchannel functions for CUPS.
  *
- *   Backchannel functions for CUPS.
+ * Copyright 2007-2014 by Apple Inc.
+ * Copyright 1997-2007 by Easy Software Products.
  *
- *   Copyright 2007-2012 by Apple Inc.
- *   Copyright 1997-2007 by Easy Software Products.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   cupsBackChannelRead()  - Read data from the backchannel.
- *   cupsBackChannelWrite() - Write data to the backchannel.
- *   cups_setup()           - Setup select()
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -50,7 +42,7 @@ static void	cups_setup(fd_set *set, struct timeval *tval,
  * parameter controls how many seconds to wait for the data - use 0.0 to
  * return immediately if there is no data, -1.0 to wait for data indefinitely.
  *
- * @since CUPS 1.2/OS X 10.5@
+ * @since CUPS 1.2/macOS 10.5@
  */
 
 ssize_t					/* O - Bytes read or -1 on error */
@@ -101,7 +93,7 @@ cupsBackChannelRead(char   *buffer,	/* I - Buffer to read into */
  * 0.0 to return immediately if the data cannot be written, -1.0 to wait
  * indefinitely.
  *
- * @since CUPS 1.2/OS X 10.5@
+ * @since CUPS 1.2/macOS 10.5@
  */
 
 ssize_t					/* O - Bytes written or -1 on error */
@@ -169,7 +161,7 @@ cupsBackChannelWrite(
       */
 
       buffer += count;
-      total  += count;
+      total  += (size_t)count;
     }
   }
 
@@ -192,8 +184,3 @@ cups_setup(fd_set         *set,		/* I - Set for select() */
   FD_ZERO(set);
   FD_SET(3, set);
 }
-
-
-/*
- * End of "$Id: backchannel.c 7616 2008-05-28 00:34:13Z mike $".
- */

@@ -1,22 +1,16 @@
 /*
- * "$Id: testlang.c 6649 2007-07-11 21:46:42Z mike $"
+ * Localization test program for CUPS.
  *
- *   Localization test program for CUPS.
+ * Copyright 2007-2015 by Apple Inc.
+ * Copyright 1997-2006 by Easy Software Products.
  *
- *   Copyright 2007-2010 by Apple Inc.
- *   Copyright 1997-2006 by Easy Software Products.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   main() - Load the specified language and show the strings for yes and no.
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -24,6 +18,7 @@
  */
 
 #include "cups-private.h"
+#include "ppd-private.h"
 
 
 /*
@@ -50,8 +45,6 @@ main(int  argc,				/* I - Number of command-line arguments */
   };
 
 
-  _cupsSetLocale(argv);
-
   if (argc == 1)
   {
     language  = cupsLangDefault();
@@ -61,7 +54,12 @@ main(int  argc,				/* I - Number of command-line arguments */
   {
     language  = cupsLangGet(argv[1]);
     language2 = cupsLangGet(argv[1]);
+
+    setenv("LANG", argv[1], 1);
+    setenv("SOFTWARE", "CUPS/" CUPS_SVERSION, 1);
   }
+
+  _cupsSetLocale(argv);
 
   if (language != language2)
   {
@@ -105,10 +103,44 @@ main(int  argc,				/* I - Number of command-line arguments */
     }
   }
 
+  if (argc == 3)
+  {
+    ppd_file_t		*ppd;		/* PPD file */
+    ppd_option_t	*option;	/* PageSize option */
+    ppd_choice_t	*choice;	/* PageSize/Letter choice */
+
+    if ((ppd = ppdOpenFile(argv[2])) == NULL)
+    {
+      printf("Unable to open PPD file \"%s\".\n", argv[2]);
+      errors ++;
+    }
+    else
+    {
+      ppdLocalize(ppd);
+
+      if ((option = ppdFindOption(ppd, "PageSize")) == NULL)
+      {
+        puts("No PageSize option.");
+        errors ++;
+      }
+      else
+      {
+        printf("PageSize: %s\n", option->text);
+
+        if ((choice = ppdFindChoice(option, "Letter")) == NULL)
+        {
+	  puts("No Letter PageSize choice.");
+	  errors ++;
+        }
+        else
+        {
+	  printf("Letter: %s\n", choice->text);
+        }
+      }
+
+      ppdClose(ppd);
+    }
+  }
+
   return (errors > 0);
 }
-
-
-/*
- * End of "$Id: testlang.c 6649 2007-07-11 21:46:42Z mike $".
- */

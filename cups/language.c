@@ -1,43 +1,16 @@
 /*
- * "$Id: language.c 7558 2008-05-12 23:46:44Z mike $"
+ * I18N/language support for CUPS.
  *
- *   I18N/language support for CUPS.
+ * Copyright 2007-2016 by Apple Inc.
+ * Copyright 1997-2007 by Easy Software Products.
  *
- *   Copyright 2007-2012 by Apple Inc.
- *   Copyright 1997-2007 by Easy Software Products.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   _cupsAppleLanguage()   - Get the Apple language identifier associated with
- *			      a locale ID.
- *   _cupsEncodingName()    - Return the character encoding name string for the
- *			      given encoding enumeration.
- *   cupsLangDefault()	    - Return the default language.
- *   cupsLangEncoding()     - Return the character encoding (us-ascii, etc.)
- *			      for the given language.
- *   cupsLangFlush()	    - Flush all language data out of the cache.
- *   cupsLangFree()	    - Free language data.
- *   cupsLangGet()	    - Get a language.
- *   _cupsLangString()	    - Get a message string.
- *   _cupsMessageFree()     - Free a messages array.
- *   _cupsMessageLoad()     - Load a .po file into a messages array.
- *   _cupsMessageLookup()   - Lookup a message string.
- *   _cupsMessageNew()	    - Make a new message catalog array.
- *   appleLangDefault()     - Get the default locale string.
- *   appleMessageLoad()     - Load a message catalog from a localizable bundle.
- *   cups_cache_lookup()    - Lookup a language in the cache...
- *   cups_message_compare() - Compare two messages.
- *   cups_message_free()    - Free a message.
- *   cups_message_load()    - Load the message catalog for a language.
- *   cups_unquote()	    - Unquote characters in strings...
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -134,7 +107,7 @@ static const char * const lang_encodings[] =
 			  "unknown",		"unknown",
 			  "euc-cn",		"euc-jp",
 			  "euc-kr",		"euc-tw",
-			  "jis-x0213"
+			  "shift_jisx0213"
 			};
 
 #ifdef __APPLE__
@@ -227,8 +200,8 @@ _cupsAppleLanguage(const char *locale,	/* I - Locale ID */
 	  */
 
 	  language[2] = '_';
-	  language[3] = toupper(language[3] & 255);
-	  language[4] = toupper(language[4] & 255);
+	  language[3] = (char)toupper(language[3] & 255);
+	  language[4] = (char)toupper(language[4] & 255);
 	}
 	break;
   }
@@ -253,7 +226,7 @@ _cupsAppleLanguage(const char *locale,	/* I - Locale ID */
     if ((langid = CFLocaleCreateCanonicalLanguageIdentifierFromString(
                       kCFAllocatorDefault, localeid)) != NULL)
     {
-      CFStringGetCString(langid, language, langsize, kCFStringEncodingASCII);
+      CFStringGetCString(langid, language, (CFIndex)langsize, kCFStringEncodingASCII);
       CFRelease(langid);
     }
 
@@ -278,8 +251,8 @@ const char *				/* O - Character encoding */
 _cupsEncodingName(
     cups_encoding_t encoding)		/* I - Encoding value */
 {
-  if (encoding < 0 ||
-      encoding >= (sizeof(lang_encodings) / sizeof(const char *)))
+  if (encoding < CUPS_US_ASCII ||
+      encoding >= (cups_encoding_t)(sizeof(lang_encodings) / sizeof(lang_encodings[0])))
   {
     DEBUG_printf(("1_cupsEncodingName(encoding=%d) = out of range (\"%s\")",
                   encoding, lang_encodings[0]));
@@ -446,7 +419,7 @@ cupsLangGet(const char *language)	/* I - Language or locale */
   * Set the character set to UTF-8...
   */
 
-  strcpy(charset, "UTF8");
+  strlcpy(charset, "UTF8", sizeof(charset));
 
  /*
   * Apple's setlocale doesn't give us the user's localization
@@ -582,7 +555,7 @@ cupsLangGet(const char *language)	/* I - Language or locale */
   */
 
   if (!charset[0])
-    strcpy(charset, "UTF8");
+    strlcpy(charset, "UTF8", sizeof(charset));
 
  /*
   * Parse the language string passed in to a locale string. "C" is the
@@ -597,7 +570,7 @@ cupsLangGet(const char *language)	/* I - Language or locale */
 
   if (language == NULL || !language[0] ||
       !strcmp(language, "POSIX"))
-    strcpy(langname, "C");
+    strlcpy(langname, "C", sizeof(langname));
   else
   {
    /*
@@ -608,7 +581,7 @@ cupsLangGet(const char *language)	/* I - Language or locale */
       if (*language == '_' || *language == '-' || *language == '.')
 	break;
       else if (ptr < (langname + sizeof(langname) - 1))
-        *ptr++ = tolower(*language & 255);
+        *ptr++ = (char)tolower(*language & 255);
 
     *ptr = '\0';
 
@@ -622,7 +595,7 @@ cupsLangGet(const char *language)	/* I - Language or locale */
 	if (*language == '.')
 	  break;
 	else if (ptr < (country + sizeof(country) - 1))
-          *ptr++ = toupper(*language & 255);
+          *ptr++ = (char)toupper(*language & 255);
 
       *ptr = '\0';
     }
@@ -635,7 +608,7 @@ cupsLangGet(const char *language)	/* I - Language or locale */
 
       for (language ++, ptr = charset; *language; language ++)
         if (_cups_isalnum(*language) && ptr < (charset + sizeof(charset) - 1))
-          *ptr++ = toupper(*language & 255);
+          *ptr++ = (char)toupper(*language & 255);
 
       *ptr = '\0';
     }
@@ -646,7 +619,7 @@ cupsLangGet(const char *language)	/* I - Language or locale */
 
     if (strlen(langname) != 2)
     {
-      strcpy(langname, "C");
+      strlcpy(langname, "C", sizeof(langname));
       country[0] = '\0';
       charset[0] = '\0';
     }
@@ -701,7 +674,7 @@ cupsLangGet(const char *language)	/* I - Language or locale */
   if (country[0])
     snprintf(real, sizeof(real), "%s_%s", langname, country);
   else
-    strcpy(real, langname);
+    strlcpy(real, langname, sizeof(real));
 
   _cupsMutexLock(&lang_mutex);
 
@@ -846,7 +819,8 @@ _cupsMessageLoad(const char *filename,	/* I - Message catalog to load */
   char			s[4096],	/* String buffer */
 			*ptr,		/* Pointer into buffer */
 			*temp;		/* New string */
-  int			length;		/* Length of combined strings */
+  size_t		length,		/* Length of combined strings */
+			ptrlen;		/* Length of string */
 
 
   DEBUG_printf(("4_cupsMessageLoad(filename=\"%s\")", filename));
@@ -977,10 +951,10 @@ _cupsMessageLoad(const char *filename,	/* I - Message catalog to load */
       * Append to current string...
       */
 
-      length = (int)strlen(m->str ? m->str : m->id);
+      length = strlen(m->str ? m->str : m->id);
+      ptrlen = strlen(ptr);
 
-      if ((temp = realloc(m->str ? m->str : m->id,
-                          length + strlen(ptr) + 1)) == NULL)
+      if ((temp = realloc(m->str ? m->str : m->id, length + ptrlen + 1)) == NULL)
       {
         if (m->str)
 	  free(m->str);
@@ -995,25 +969,25 @@ _cupsMessageLoad(const char *filename,	/* I - Message catalog to load */
       {
        /*
         * Copy the new portion to the end of the msgstr string - safe
-	* to use strcpy because the buffer is allocated to the correct
+	* to use memcpy because the buffer is allocated to the correct
 	* size...
 	*/
 
         m->str = temp;
 
-	strcpy(m->str + length, ptr);
+	memcpy(m->str + length, ptr, ptrlen + 1);
       }
       else
       {
        /*
         * Copy the new portion to the end of the msgid string - safe
-	* to use strcpy because the buffer is allocated to the correct
+	* to use memcpy because the buffer is allocated to the correct
 	* size...
 	*/
 
         m->id = temp;
 
-	strcpy(m->id + length, ptr);
+	memcpy(m->id + length, ptr, ptrlen + 1);
       }
     }
     else if (!strncmp(s, "msgstr", 6) && m)
@@ -1163,7 +1137,7 @@ appleLangDefault(void)
   int			i;		/* Looping var */
   CFBundleRef		bundle;		/* Main bundle (if any) */
   CFArrayRef		bundleList;	/* List of localizations in bundle */
-  CFPropertyListRef 	localizationList;
+  CFPropertyListRef 	localizationList = NULL;
 					/* List of localization data */
   CFStringRef		languageName;	/* Current name */
   CFStringRef		localeName;	/* Canonical from of name */
@@ -1182,24 +1156,67 @@ appleLangDefault(void)
   {
     if (getenv("SOFTWARE") != NULL && (lang = getenv("LANG")) != NULL)
     {
+      DEBUG_printf(("3appleLangDefault: Using LANG=%s", lang));
       strlcpy(cg->language, lang, sizeof(cg->language));
       return (cg->language);
     }
     else if ((bundle = CFBundleGetMainBundle()) != NULL &&
              (bundleList = CFBundleCopyBundleLocalizations(bundle)) != NULL)
     {
-      localizationList =
-	  CFBundleCopyPreferredLocalizationsFromArray(bundleList);
+      CFURLRef resources = CFBundleCopyResourcesDirectoryURL(bundle);
+
+      DEBUG_puts("3appleLangDefault: Getting localizationList from bundle.");
+
+      if (resources)
+      {
+        CFStringRef	cfpath = CFURLCopyPath(resources);
+	char		path[1024];
+
+        if (cfpath)
+	{
+	 /*
+	  * See if we have an Info.plist file in the bundle...
+	  */
+
+	  CFStringGetCString(cfpath, path, sizeof(path), kCFStringEncodingUTF8);
+	  DEBUG_printf(("3appleLangDefault: Got a resource URL (\"%s\")", path));
+	  strlcat(path, "Contents/Info.plist", sizeof(path));
+
+          if (!access(path, R_OK))
+	    localizationList = CFBundleCopyPreferredLocalizationsFromArray(bundleList);
+	  else
+	    DEBUG_puts("3appleLangDefault: No Info.plist, ignoring resource URL...");
+
+	  CFRelease(cfpath);
+	}
+
+	CFRelease(resources);
+      }
+      else
+        DEBUG_puts("3appleLangDefault: No resource URL.");
 
       CFRelease(bundleList);
     }
-    else
+
+    if (!localizationList)
+    {
+      DEBUG_puts("3appleLangDefault: Getting localizationList from preferences.");
+
       localizationList =
 	  CFPreferencesCopyAppValue(CFSTR("AppleLanguages"),
 				    kCFPreferencesCurrentApplication);
+    }
 
     if (localizationList)
     {
+#ifdef DEBUG
+      if (CFGetTypeID(localizationList) == CFArrayGetTypeID())
+        DEBUG_printf(("3appleLangDefault: Got localizationList, %d entries.",
+                      (int)CFArrayGetCount(localizationList)));
+      else
+        DEBUG_puts("3appleLangDefault: Got localizationList but not an array.");
+#endif /* DEBUG */
+
       if (CFGetTypeID(localizationList) == CFArrayGetTypeID() &&
 	  CFArrayGetCount(localizationList) > 0)
       {
@@ -1217,7 +1234,7 @@ appleLangDefault(void)
 			       kCFStringEncodingASCII);
 	    CFRelease(localeName);
 
-	    DEBUG_printf(("9appleLangDefault: cg->language=\"%s\"",
+	    DEBUG_printf(("3appleLangDefault: cg->language=\"%s\"",
 			  cg->language));
 
 	   /*
@@ -1231,7 +1248,7 @@ appleLangDefault(void)
 	    {
 	      if (!strcmp(cg->language, apple_language_locale[i].language))
 	      {
-		DEBUG_printf(("9appleLangDefault: mapping \"%s\" to \"%s\"...",
+		DEBUG_printf(("3appleLangDefault: mapping \"%s\" to \"%s\"...",
 			      cg->language, apple_language_locale[i].locale));
 		strlcpy(cg->language, apple_language_locale[i].locale,
 			sizeof(cg->language));
@@ -1249,6 +1266,8 @@ appleLangDefault(void)
 	    if (!strchr(cg->language, '.'))
 	      strlcat(cg->language, ".UTF-8", sizeof(cg->language));
 	  }
+	  else
+	    DEBUG_puts("3appleLangDefault: Unable to get localeName.");
 	}
       }
 
@@ -1260,8 +1279,13 @@ appleLangDefault(void)
     */
 
     if (!cg->language[0])
+    {
+      DEBUG_puts("3appleLangDefault: Defaulting to en_US.");
       strlcpy(cg->language, "en_US.UTF-8", sizeof(cg->language));
+    }
   }
+  else
+    DEBUG_printf(("3appleLangDefault: Using previous locale \"%s\".", cg->language));
 
  /*
   * Return the cached locale...
@@ -1280,7 +1304,8 @@ static cups_array_t *			/* O - Message catalog */
 appleMessageLoad(const char *locale)	/* I - Locale ID */
 {
   char			filename[1024],	/* Path to cups.strings file */
-			applelang[256];	/* Apple language ID */
+			applelang[256],	/* Apple language ID */
+			baselang[3];	/* Base language */
   CFURLRef		url;		/* URL to cups.strings file */
   CFReadStreamRef	stream = NULL;	/* File stream */
   CFPropertyListRef	plist = NULL;	/* Localization file */
@@ -1298,6 +1323,30 @@ appleMessageLoad(const char *locale)	/* I - Locale ID */
   snprintf(filename, sizeof(filename),
            CUPS_BUNDLEDIR "/Resources/%s.lproj/cups.strings",
 	   _cupsAppleLanguage(locale, applelang, sizeof(applelang)));
+
+  if (access(filename, 0))
+  {
+   /*
+    * <rdar://problem/22086642>
+    *
+    * Try with original locale string...
+    */
+
+    snprintf(filename, sizeof(filename), CUPS_BUNDLEDIR "/Resources/%s.lproj/cups.strings", locale);
+  }
+
+  if (access(filename, 0))
+  {
+   /*
+    * <rdar://problem/25292403>
+    *
+    * Try with just the language code...
+    */
+
+    strlcpy(baselang, locale, sizeof(baselang));
+    snprintf(filename, sizeof(filename), CUPS_BUNDLEDIR "/Resources/%s.lproj/cups.strings", baselang);
+  }
+
   DEBUG_printf(("1appleMessageLoad: filename=\"%s\"", filename));
 
   if (access(filename, 0))
@@ -1308,7 +1357,9 @@ appleMessageLoad(const char *locale)	/* I - Locale ID */
 
     if (!strncmp(locale, "en", 2))
       locale = "English";
-    else if (!strncmp(locale, "nb", 2) || !strncmp(locale, "nl", 2))
+    else if (!strncmp(locale, "nb", 2))
+      locale = "no";
+    else if (!strncmp(locale, "nl", 2))
       locale = "Dutch";
     else if (!strncmp(locale, "fr", 2))
       locale = "French";
@@ -1320,6 +1371,28 @@ appleMessageLoad(const char *locale)	/* I - Locale ID */
       locale = "Japanese";
     else if (!strncmp(locale, "es", 2))
       locale = "Spanish";
+    else if (!strcmp(locale, "zh_HK"))
+    {
+     /*
+      * <rdar://problem/22130168>
+      *
+      * Try zh_TW first, then zh...  Sigh...
+      */
+
+      if (!access(CUPS_BUNDLEDIR "/Resources/zh_TW.lproj/cups.strings", 0))
+        locale = "zh_TW";
+      else
+        locale = "zh";
+    }
+    else if (strstr(locale, "_") != NULL || strstr(locale, "-") != NULL)
+    {
+     /*
+      * Drop country code, just try language...
+      */
+
+      strlcpy(baselang, locale, sizeof(baselang));
+      locale = baselang;
+    }
 
     snprintf(filename, sizeof(filename),
 	     CUPS_BUNDLEDIR "/Resources/%s.lproj/cups.strings", locale);
@@ -1328,7 +1401,7 @@ appleMessageLoad(const char *locale)	/* I - Locale ID */
 
   url = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault,
                                                 (UInt8 *)filename,
-						strlen(filename), false);
+						(CFIndex)strlen(filename), false);
   if (url)
   {
     stream = CFReadStreamCreateWithFile(kCFAllocatorDefault, url);
@@ -1415,7 +1488,7 @@ cups_cache_lookup(
   for (lang = lang_cache; lang != NULL; lang = lang->next)
   {
     DEBUG_printf(("9cups_cache_lookup: lang=%p, language=\"%s\", "
-		  "encoding=%d(%s)", lang, lang->language, lang->encoding,
+		  "encoding=%d(%s)", (void *)lang, lang->language, lang->encoding,
 		  lang_encodings[lang->encoding]));
 
     if (!strcmp(lang->language, name) &&
@@ -1560,8 +1633,3 @@ cups_unquote(char       *d,		/* O - Unquoted string */
 
   *d = '\0';
 }
-
-
-/*
- * End of "$Id: language.c 7558 2008-05-12 23:46:44Z mike $".
- */

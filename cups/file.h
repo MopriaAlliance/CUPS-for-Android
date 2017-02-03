@@ -1,21 +1,21 @@
 /*
- * "$Id: file.h 7460 2008-04-16 02:19:54Z mike $"
+ * Public file definitions for CUPS.
  *
- *   Public file definitions for CUPS.
+ * Since stdio files max out at 256 files on many systems, we have to
+ * write similar functions without this limit.  At the same time, using
+ * our own file functions allows us to provide transparent support of
+ * gzip'd print files, PPD files, etc.
  *
- *   Since stdio files max out at 256 files on many systems, we have to
- *   write similar functions without this limit.  At the same time, using
- *   our own file functions allows us to provide transparent support of
- *   gzip'd print files, PPD files, etc.
+ * Copyright 2007-2014 by Apple Inc.
+ * Copyright 1997-2007 by Easy Software Products, all rights reserved.
  *
- *   Copyright 2007-2011 by Apple Inc.
- *   Copyright 1997-2007 by Easy Software Products, all rights reserved.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 #ifndef _CUPS_FILE_H_
@@ -110,7 +110,3 @@ extern ssize_t		cupsFileWrite(cups_file_t *fp, const char *buf,
 }
 #  endif /* __cplusplus */
 #endif /* !_CUPS_FILE_H_ */
-
-/*
- * End of "$Id: file.h 7460 2008-04-16 02:19:54Z mike $".
- */

@@ -1,4 +1,4 @@
-INSTALL - CUPS v1.6.3 - 2013-07-11
+INSTALL - CUPS v2.2.1 - 2016-10-03
 ----------------------------------
 
 This file describes how to compile and install CUPS from source code. For more
@@ -29,27 +29,16 @@ BEFORE YOU BEGIN
     Compaq, HP, SGI, and Sun.  BSD users should use GNU make (gmake) since BSD
     make does not support "include".
 
-    Besides these tools you'll want the JPEG, PNG, TIFF, and ZLIB libraries for
-    image support, the CDSA, GNU TLS, or OpenSSL libraries for encryption
-    support, the OpenLDAP and OpenSLP libraries for directory services support,
-    and either MIT (1.6.3 or higher) or Heimdal Kerberos for Kerberos support.
-    CUPS will compile and run without these, however you'll miss out on many of
-    the features provided by CUPS.
+    Besides these tools you'll want ZLIB library for compression support, the
+    GNU TLS library for encryption support on platforms other than iOS, macOS,
+    or Windows, and either MIT (1.6.3 or higher) or Heimdal Kerberos for
+    Kerberos support.  CUPS will compile and run without these, however you'll
+    miss out on many of the features provided by CUPS.
 
-    Also, please note that CUPS does not include the Ghostscript-based
-    PostScript filter needed by non-PostScript printers.  You *must* download
-    GPL Ghostscript separately from the CUPS web site if you want to print
-    PostScript files to non-PostScript printers on operating systems other than
-    OS X.
-
-
-COMPILING THE SUBVERSION REPOSITORY CODE
-
-    The CUPS Subversion repository doesn't hold a copy of the pre-built
-    configure script.  You'll need to run the GNU autoconf software (2.60 or
-    higher) to create it:
-
-	autoconf
+    Also, please note that CUPS does not include print filters to support PDF
+    or raster printing.  You *must* download GPL Ghostscript and/or the Open
+    Printing CUPS filters package separately to print on operating systems
+    other than macOS.
 
 
 CONFIGURATION
@@ -100,6 +89,19 @@ CONFIGURATION
     and diagnose a variety of common problems - use the "--enable-unit-tests"
     configure option to run them at build time.
 
+    On macOS, use the "--with-archflags" option to build with the correct set of
+    architectures:
+
+        ./configure --with-archflags="-arch i386 -arch x86_64" ...
+
+        Note: Current versions of macOS DO NOT allow installation to
+        /usr with the default system integrity settings.  In addition,
+        we do not recommend replacing the CUPS supplied with macOS
+        because not all versions of CUPS are compatible with every
+        macOS release, and because software updates will replace parts
+        of your local installation potentially rendering your system
+        unusable.
+
     Once you have configured things, just type:
 
 	make ENTER
@@ -138,6 +140,10 @@ INSTALLING THE SOFTWARE
 
 	gmake install ENTER
 
+    Use the BUILDROOT variable to install to an alternate root directory:
+
+        make BUILDROOT=/some/other/root/directory install ENTER
+
     You can also build binary packages that can be installed on other machines
     using the RPM spec file ("packaging/cups.spec") or EPM list file
     ("packaging/cups.list").  The latter also supports building of binary RPMs,
@@ -149,7 +155,7 @@ INSTALLING THE SOFTWARE
 
     The EPM software is available at:
 
-	http://www.epmhome.org/
+	http://www.msweet.org/
 
 
 CREATING BINARY DISTRIBUTIONS WITH EPM
@@ -167,17 +173,11 @@ CREATING BINARY DISTRIBUTIONS WITH EPM
     following:
 
 	epm       - Builds a script + tarfile package
-	aix       - Builds an AIX package
 	bsd       - Builds a *BSD package
 	deb       - Builds a Debian package
-	depot     - Builds a HP-UX package (also swinstall)
-	inst      - Builds an IRIX package (also tardist)
 	pkg       - Builds a Solaris package
 	rpm       - Builds a RPM package
-	setld     - Build a Tru64 UNIX package
 	slackware - Build a Slackware package
-	swinstall - Build a HP-UX package (also depot)
-	tardist   - Builds an IRIX package (also inst)
 
 
 GETTING DEBUG LOGGING FROM CUPS
@@ -199,10 +199,9 @@ GETTING DEBUG LOGGING FROM CUPS
 REPORTING PROBLEMS
 
     If you have problems, READ THE DOCUMENTATION FIRST!  If the documentation
-    does not solve your problems, please post a message on the "cups.general"
-    forum at:
+    does not solve your problems, please post a message on the users forum at:
 
-        http://www.cups.org/newsgroups.php
+        http://www.cups.org/
 
     Include your operating system and version, compiler and version, and any
     errors or problems you've run into.  The "config.log" file and the output

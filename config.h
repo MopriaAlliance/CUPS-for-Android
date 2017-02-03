@@ -18,6 +18,8 @@
   * rather than by running the configure script again.
   */
 
+#include <fcntl.h>
+
 #ifndef _CUPS_CONFIG_H_
 #define _CUPS_CONFIG_H_
 
@@ -302,7 +304,7 @@
 
 //#define HAVE_CDSASSL 1
 /* #undef HAVE_GNUTLS */
-#define HAVE_LIBSSL 1
+#define HAVE_GNUTLS 1
 #define HAVE_SSL 1
 
 
@@ -742,6 +744,15 @@ static __inline int _cups_abs(int i) { return (i < 0 ? -i : i); }
 #    define abs(x) ((x) < 0 ? -(x) : (x))
 #  endif /* __GNUC__ || __STDC_VERSION__ */
 #endif /* !HAVE_ABS && !abs */
+
+// 11/23/2016 Mopria-notice: as lockf method is not defined in the Android, we defined our own.
+#define F_LOCK LOCK_EX
+#define F_ULOCK LOCK_UN
+#define F_TLOCK ( LOCK_EX | LOCK_NB )
+#define F_TULOCK ( LOCK_UN | LOCK_NB )
+static inline int lockf(int fd, int cmd, off_t ignored_len) {
+    return flock(fd, cmd);
+}
 
 #endif /* !_CUPS_CONFIG_H_ */
 

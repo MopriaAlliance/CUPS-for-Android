@@ -1,25 +1,16 @@
 /*
- * "$Id: rasterbench.c 7376 2008-03-19 21:07:45Z mike $"
+ * Raster benchmark program for CUPS.
  *
- *   Raster benchmark program for CUPS.
+ * Copyright 2007-2016 by Apple Inc.
+ * Copyright 1997-2006 by Easy Software Products.
  *
- *   Copyright 2007-2011 by Apple Inc.
- *   Copyright 1997-2006 by Easy Software Products.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   main()           - Benchmark the raster read/write functions.
- *   compute_median() - Compute the median time for a test.
- *   read_test()      - Benchmark the raster read functions.
- *   write_test()     - Benchmark the raster write functions.
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -28,6 +19,7 @@
 
 #include <config.h>
 #include <cups/raster.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
 #include <signal.h>
@@ -181,7 +173,7 @@ get_time(void)
 static void
 read_test(int fd)			/* I - File descriptor to read from */
 {
-  int			y;		/* Looping var */
+  unsigned		y;		/* Looping var */
   cups_raster_t		*r;		/* Raster stream */
   cups_page_header2_t	header;		/* Page header */
   unsigned char		buffer[8 * TEST_WIDTH];
@@ -263,8 +255,8 @@ static void
 write_test(int         fd,		/* I - File descriptor to write to */
            cups_mode_t mode)		/* I - Write mode */
 {
-  int			page, x, y;	/* Looping vars */
-  int			count;		/* Number of bytes to set */
+  unsigned		page, x, y;	/* Looping vars */
+  unsigned		count;		/* Number of bytes to set */
   cups_raster_t		*r;		/* Raster stream */
   cups_page_header2_t	header;		/* Page header */
   unsigned char		data[32][8 * TEST_WIDTH];
@@ -295,7 +287,7 @@ write_test(int         fd,		/* I - File descriptor to write to */
 	  break;
       }
 
-      data[y][x] = CUPS_RAND();
+      data[y][x] = (unsigned char)CUPS_RAND();
     }
   }
 
@@ -348,8 +340,3 @@ write_test(int         fd,		/* I - File descriptor to write to */
 
   cupsRasterClose(r);
 }
-
-
-/*
- * End of "$Id: rasterbench.c 7376 2008-03-19 21:07:45Z mike $".
- */

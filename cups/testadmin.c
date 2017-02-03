@@ -1,23 +1,16 @@
 /*
- * "$Id: testadmin.c 7720 2008-07-11 22:46:21Z mike $"
+ * Admin function test program for CUPS.
  *
- *   Admin function test program for CUPS.
+ * Copyright 2007-2013 by Apple Inc.
+ * Copyright 2006 by Easy Software Products.
  *
- *   Copyright 2007-2010 by Apple Inc.
- *   Copyright 2006 by Easy Software Products.
+ * These coded instructions, statements, and computer programs are the
+ * property of Apple Inc. and are protected by Federal copyright
+ * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
+ * which should have been included with this file.  If this file is
+ * file is missing or damaged, see the license at "http://www.cups.org/".
  *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
- *
- *   This file is subject to the Apple OS-Developed Software exception.
- *
- * Contents:
- *
- *   main()          - Main entry.
- *   show_settings() - Show settings in the array...
+ * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -53,7 +46,8 @@ main(int  argc,				/* I - Number of command-line args */
   * Connect to the server using the defaults...
   */
 
-  http = httpConnectEncrypt(cupsServer(), ippPort(), cupsEncryption());
+  http = httpConnect2(cupsServer(), ippPort(), NULL, AF_UNSPEC,
+                      cupsEncryption(), 1, 30000, NULL);
 
  /*
   * Set the current configuration if we have anything on the command-line...
@@ -113,8 +107,3 @@ show_settings(
     num_settings --;
   }
 }
-
-
-/*
- * End of "$Id: testadmin.c 7720 2008-07-11 22:46:21Z mike $".
- */
