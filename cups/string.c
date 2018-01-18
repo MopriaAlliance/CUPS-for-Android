@@ -8,7 +8,7 @@
  * property of Apple Inc. and are protected by Federal copyright
  * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
  * which should have been included with this file.  If this file is
- * file is missing or damaged, see the license at "http://www.cups.org/".
+ * missing or damaged, see the license at "http://www.cups.org/".
  *
  * This file is subject to the Apple OS-Developed Software exception.
  */
@@ -231,15 +231,12 @@ _cupsStrFormatd(char         *buf,	/* I - String */
   * Next, find the decimal point...
   */
 
-/* 07/22/2016 Mopria-notice: this causes "struct lconv has no member named 'decimal_point'"
-compilation error in Android so commenting out
-   if (loc && loc->decimal_point)
+  if (loc && loc->decimal_point)
   {
     dec    = loc->decimal_point;
     declen = (int)strlen(dec);
   }
   else
-  */
   {
     dec    = ".";
     declen = 1;
@@ -448,16 +445,12 @@ _cupsStrScand(const char   *buf,	/* I - Pointer to number */
 
     buf ++;
 
-/*    07/22/2016 Mopria-notice: this causes "struct lconv has no member named 'decimal_point'"
-      compilation error in Android so commenting out
     if (loc && loc->decimal_point)
     {
       strlcpy(tempptr, loc->decimal_point, sizeof(temp) - (size_t)(tempptr - temp));
       tempptr += strlen(tempptr);
     }
-    else
-    */
-    if (tempptr < (temp + sizeof(temp) - 1))
+    else if (tempptr < (temp + sizeof(temp) - 1))
       *tempptr++ = '.';
     else
     {
@@ -702,10 +695,11 @@ _cups_strlcat(char       *dst,		/* O - Destination string */
   */
 
   dstlen = strlen(dst);
-  size   -= dstlen + 1;
 
-  if (!size)
-    return (dstlen);		/* No room, return immediately... */
+  if (size < (dstlen + 1))
+    return (dstlen);		        /* No room, return immediately... */
+
+  size -= dstlen + 1;
 
  /*
   * Figure out how much room is needed...

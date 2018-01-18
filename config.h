@@ -4,21 +4,21 @@
  *
  *   Configuration file for CUPS.
  *
- *   Copyright 2007-2012 by Apple Inc.
+ *   Copyright 2007-2017 by Apple Inc.
  *   Copyright 1997-2007 by Easy Software Products.
  *
  *   These coded instructions, statements, and computer programs are the
  *   property of Apple Inc. and are protected by Federal copyright
  *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
  *   which should have been included with this file.  If this file is
- *   file is missing or damaged, see the license at "http://www.cups.org/".
+ *   missing or damaged, see the license at "http://www.cups.org/".
  */
 
  /* 07/22/2016 Mopria-notice: some config changes were applied directly to this generated file
   * rather than by running the configure script again.
   */
 
-#include <fcntl.h>
+#include <sys/file.h>
 
 #ifndef _CUPS_CONFIG_H_
 #define _CUPS_CONFIG_H_
@@ -27,8 +27,8 @@
  * Version of software...
  */
 
-#define CUPS_SVERSION "CUPS v1.6.3"
-#define CUPS_MINIMAL "CUPS/1.6.3"
+#define CUPS_SVERSION "CUPS v2.2.3"
+#define CUPS_MINIMAL "CUPS/2.2.3"
 
 
 /*
@@ -745,14 +745,13 @@ static __inline int _cups_abs(int i) { return (i < 0 ? -i : i); }
 #  endif /* __GNUC__ || __STDC_VERSION__ */
 #endif /* !HAVE_ABS && !abs */
 
-// 11/23/2016 Mopria-notice: as lockf method is not defined in the Android, we defined our own.
-#define F_LOCK LOCK_EX
-#define F_ULOCK LOCK_UN
-#define F_TLOCK ( LOCK_EX | LOCK_NB )
-#define F_TULOCK ( LOCK_UN | LOCK_NB )
+// 11/23/2016 Mopria-notice: lockf not present in Android.
 static inline int lockf(int fd, int cmd, off_t ignored_len) {
     return flock(fd, cmd);
 }
+
+// 08/28/2016 Mopria-notice: pthread_cancel not defined in Android
+void pthread_cancel(int thread);
 
 #endif /* !_CUPS_CONFIG_H_ */
 

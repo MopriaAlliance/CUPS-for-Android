@@ -1,14 +1,14 @@
 /*
  * HTTP address list routines for CUPS.
  *
- * Copyright 2007-2016 by Apple Inc.
+ * Copyright 2007-2017 by Apple Inc.
  * Copyright 1997-2007 by Easy Software Products, all rights reserved.
  *
  * These coded instructions, statements, and computer programs are the
  * property of Apple Inc. and are protected by Federal copyright
  * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
  * which should have been included with this file.  If this file is
- * file is missing or damaged, see the license at "http://www.cups.org/".
+ * missing or damaged, see the license at "http://www.cups.org/".
  *
  * This file is subject to the Apple OS-Developed Software exception.
  */
@@ -32,7 +32,7 @@
 /*
  * 'httpAddrConnect()' - Connect to any of the addresses in the list.
  *
- * @since CUPS 1.2/macOS 10.5@
+ * @since CUPS 1.2/macOS 10.5@ @exclude all@
  */
 
 http_addrlist_t *			/* O - Connected address or NULL on failure */
@@ -312,7 +312,7 @@ httpAddrConnect2(
 	DEBUG_printf(("pfds[%d].revents=%x\n", i, pfds[i].revents));
 	if (pfds[i].revents && !(pfds[i].revents & (POLLERR | POLLHUP)))
 #  else
-	if (FD_ISSET(fds[i], &input) && !FD_ISSET(fds[i], &error))
+	if (FD_ISSET(fds[i], &input_set) && !FD_ISSET(fds[i], &error_set))
 #  endif /* HAVE_POLL */
 	{
 	  *sock    = fds[i];
@@ -327,7 +327,7 @@ httpAddrConnect2(
 #  ifdef HAVE_POLL
 	else if (pfds[i].revents & (POLLERR | POLLHUP))
 #  else
-	else if (FD_ISSET(fds[i], &error))
+	else if (FD_ISSET(fds[i], &error_set))
 #  endif /* HAVE_POLL */
         {
          /*

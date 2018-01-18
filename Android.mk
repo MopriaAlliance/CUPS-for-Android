@@ -62,22 +62,23 @@ LOCAL_SRC_FILES:= \
 	cups/string.c \
 	cups/tempfile.c \
 	cups/thread.c \
-	cups/tls-gnutls.c \
+	cups/tls.c \
 	cups/transcode.c \
 	cups/usersys.c \
 	cups/util.c \
 	filter/error.c \
 	filter/raster.c \
+	mopria.c \
 
 disabled_src_files:= \
 
 LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/cups \
 	$(LOCAL_PATH)/../gnutls/include
-LOCAL_CFLAGS := -D_PPD_DEPRECATED=
+LOCAL_CFLAGS := -D_PPD_DEPRECATED= -Wno-implicit-function-declaration -Wno-empty-body
 LOCAL_MODULE := lib$(PRIV_LIB_NAME)cups
 LOCAL_MODULE_TAGS := optional
-LOCAL_LDLIBS += -lz -llog
+LOCAL_LDLIBS += -lz -llog -Wl,--no-warn-shared-textrel
 LOCAL_STATIC_LIBRARIES := libgnutls
 LOCAL_DISABLE_FATAL_LINKER_WARNINGS := true
 include $(BUILD_SHARED_LIBRARY)

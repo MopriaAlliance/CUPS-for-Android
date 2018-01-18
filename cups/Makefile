@@ -8,7 +8,7 @@
 # property of Apple Inc. and are protected by Federal copyright
 # law.  Distribution and use rights are outlined in the file "LICENSE.txt"
 # which should have been included with this file.  If this file is
-# file is missing or damaged, see the license at "http://www.cups.org/".
+# missing or damaged, see the license at "http://www.cups.org/".
 #
 # This file is subject to the Apple OS-Developed Software exception.
 #
@@ -571,56 +571,27 @@ tlscheck:	tlscheck.o $(LIBCUPSSTATIC)
 
 apihelp:
 	echo Generating CUPS API help files...
-	mxmldoc --section "Programming" \
-		--title "Introduction to CUPS Programming" \
-		--css ../doc/cups-printable.css \
-		--header api-overview.header --intro api-overview.shtml \
-		>../doc/help/api-overview.html
+	$(RM) cupspm.xml
+	mxmldoc --section "Programming" --body cupspm.md \
+		cupspm.xml \
+		auth.c cups.h dest*.c encode.c http.h http*.c ipp.h ipp*.c \
+		options.c tls-darwin.c usersys.c util.c \
+		--coverimage cupspm.png \
+		--epub ../doc/help/cupspm.epub
+	mxmldoc --section "Programming" --body cupspm.md \
+		cupspm.xml > ../doc/help/cupspm.html
+	$(RM) cupspm.xml
 	mxmldoc --section "Programming" --title "Administration APIs" \
 		--css ../doc/cups-printable.css \
 		--header api-admin.header --intro api-admin.shtml \
 		api-admin.xml \
 		adminutil.c adminutil.h getdevices.c >../doc/help/api-admin.html
-	mxmldoc --tokens help/api-admin.html api-admin.xml >../doc/help/api-admin.tokens
 	$(RM) api-admin.xml
-	mxmldoc --section "Programming" --title "Array API" \
-		--css ../doc/cups-printable.css \
-		--header api-array.header --intro api-array.shtml \
-		api-array.xml \
-		array.h array.c >../doc/help/api-array.html
-	mxmldoc --tokens help/api-array.html api-array.xml >../doc/help/api-array.tokens
-	$(RM) api-array.xml
-	mxmldoc --section "Programming" --title "CUPS API" \
-		--css ../doc/cups-printable.css \
-		--header api-cups.header --intro api-cups.shtml \
-		api-cups.xml \
-		cups.h pwg.h adminutil.c dest*.c language.c notify.c \
-		options.c pwg-media.c tempfile.c usersys.c \
-		util.c >../doc/help/api-cups.html
-	mxmldoc --tokens help/api-cups.html api-cups.xml >../doc/help/api-cups.tokens
-	$(RM) api-cups.xml
-	mxmldoc --section "Programming" --title "File and Directory APIs" \
-		--css ../doc/cups-printable.css \
-		--header api-filedir.header --intro api-filedir.shtml \
-		api-filedir.xml \
-		file.h file.c dir.h dir.c >../doc/help/api-filedir.html
-	mxmldoc --tokens api-filedir.xml >../doc/help/api-filedir.tokens
-	$(RM) api-filedir.xml
 	mxmldoc --section "Programming" --title "PPD API (DEPRECATED)" \
 		--css ../doc/cups-printable.css \
 		--header api-ppd.header --intro api-ppd.shtml \
 		api-ppd.xml ppd.h ppd-*.c >../doc/help/api-ppd.html
-	mxmldoc --tokens help/api-ppd.html api-ppd.xml >../doc/help/api-ppd.tokens
 	$(RM) api-ppd.xml
-	mxmldoc --section "Programming" --title "HTTP and IPP APIs" \
-		--css ../doc/cups-printable.css \
-		--header api-httpipp.header --intro api-httpipp.shtml \
-		api-httpipp.xml \
-		http.h ipp.h auth.c getdevices.c getputfile.c encode.c \
-		http.c http-addr.c http-support.c ipp.c ipp-support.c \
-		md5passwd.c request.c >../doc/help/api-httpipp.html
-	mxmldoc --tokens help/api-httpipp.html api-httpipp.xml >../doc/help/api-httpipp.tokens
-	$(RM) api-httpipp.xml
 	mxmldoc --section "Programming" \
 		--title "Filter and Backend Programming" \
 		--css ../doc/cups-printable.css \
@@ -628,7 +599,6 @@ apihelp:
 		api-filter.xml \
 		backchannel.c backend.h backend.c sidechannel.c sidechannel.h \
 		>../doc/help/api-filter.html
-	mxmldoc --tokens help/api-filter.html api-filter.xml >../doc/help/api-filter.tokens
 	$(RM) api-filter.xml
 
 
@@ -637,8 +607,6 @@ apihelp:
 #
 
 sloc:
-	echo "libcupslite: \c"
-	sloccount $(LITEOBJS:.o=.c) 2>/dev/null | grep "Total Physical" | awk '{print $$9}'
 	echo "libcups: \c"
 	sloccount $(LIBOBJS:.o=.c) 2>/dev/null | grep "Total Physical" | awk '{print $$9}'
 

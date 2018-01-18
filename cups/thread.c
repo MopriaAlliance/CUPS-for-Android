@@ -7,7 +7,7 @@
  * property of Apple Inc. and are protected by Federal copyright
  * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
  * which should have been included with this file.  If this file is
- * file is missing or damaged, see the license at "http://www.cups.org/".
+ * missing or damaged, see the license at "http://www.cups.org/".
  *
  * This file is subject to the Apple OS-Developed Software exception.
  */
@@ -150,8 +150,7 @@ _cupsRWUnlock(_cups_rwlock_t *rwlock)	/* I - Reader/writer lock */
 void
 _cupsThreadCancel(_cups_thread_t thread)/* I - Thread ID */
 {
-  // Mopria-notice: pthread_cancel is not defined in the Android, commenting out.
-  // pthread_cancel(thread);
+  pthread_cancel(thread);
 }
 
 
