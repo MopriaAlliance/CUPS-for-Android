@@ -267,7 +267,8 @@ extern const char	*_cupsGSSServiceName(void) _CUPS_PRIVATE;
 extern int		_cupsNextDelay(int current, int *previous) _CUPS_PRIVATE;
 extern void		_cupsSetDefaults(void) _CUPS_INTERNAL;
 extern void		_cupsSetError(ipp_status_t status, const char *message, int localize) _CUPS_PRIVATE;
-extern void		_cupsSetHTTPError(http_status_t status) _CUPS_INTERNAL;
+/* 07/12/2019 Mopria-notice: Eliminate _CUPS_INTERNAL for use. */
+extern void		_cupsSetHTTPError(http_status_t status);
 #  ifdef HAVE_GSSAPI
 extern int		_cupsSetNegotiateAuthString(http_t *http, const char *method, const char *resource) _CUPS_PRIVATE;
 #  endif /* HAVE_GSSAPI */
