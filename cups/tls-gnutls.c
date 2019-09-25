@@ -1,16 +1,11 @@
 /*
  * TLS support code for CUPS using GNU TLS.
  *
- * Copyright 2007-2017 by Apple Inc.
- * Copyright 1997-2007 by Easy Software Products, all rights reserved.
+ * Copyright © 2007-2019 by Apple Inc.
+ * Copyright © 1997-2007 by Easy Software Products, all rights reserved.
  *
- * These coded instructions, statements, and computer programs are the
- * property of Apple Inc. and are protected by Federal copyright
- * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- * which should have been included with this file.  If this file is
- * missing or damaged, see the license at "http://www.cups.org/".
- *
- * This file is subject to the Apple OS-Developed Software exception.
+ * Licensed under Apache License v2.0.  See the file "LICENSE" for more
+ * information.
  */
 
 /**** This file is included from tls.c ****/
@@ -35,7 +30,9 @@ static char		*tls_keypath = NULL;
 					/* Server cert keychain path */
 static _cups_mutex_t	tls_mutex = _CUPS_MUTEX_INITIALIZER;
 					/* Mutex for keychain/certs */
-static int		tls_options = -1;/* Options for TLS connections */
+static int		tls_options = -1,/* Options for TLS connections */
+			tls_min_version = _HTTP_TLS_1_0,
+			tls_max_version = _HTTP_TLS_MAX;
 
 
 /*
@@ -171,10 +168,33 @@ cupsMakeServerCredentials(
   gnutls_x509_crt_set_activation_time(crt, curtime);
   gnutls_x509_crt_set_expiration_time(crt, curtime + 10 * 365 * 86400);
   gnutls_x509_crt_set_ca_status(crt, 0);
+  gnutls_x509_crt_set_subject_alt_name(crt, GNUTLS_SAN_DNSNAME, common_name, (unsigned)strlen(common_name), GNUTLS_FSAN_SET);
+  if (!strchr(common_name, '.'))
+  {
+   /*
+    * Add common_name.local to the list, too...
+    */
+
+    char localname[256];                /* hostname.local */
+
+    snprintf(localname, sizeof(localname), "%s.local", common_name);
+    gnutls_x509_crt_set_subject_alt_name(crt, GNUTLS_SAN_DNSNAME, localname, (unsigned)strlen(localname), GNUTLS_FSAN_APPEND);
+  }
+  gnutls_x509_crt_set_subject_alt_name(crt, GNUTLS_SAN_DNSNAME, "localhost", 9, GNUTLS_FSAN_APPEND);
   if (num_alt_names > 0)
-    gnutls_x509_crt_set_subject_alternative_name(crt, GNUTLS_SAN_DNSNAME, alt_names[0]);
+  {
+    int i;                              /* Looping var */
+
+    for (i = 0; i < num_alt_names; i ++)
+    {
+      if (strcmp(alt_names[i], "localhost"))
+      {
+        gnutls_x509_crt_set_subject_alt_name(crt, GNUTLS_SAN_DNSNAME, alt_names[i], (unsigned)strlen(alt_names[i]), GNUTLS_FSAN_APPEND);
+      }
+    }
+  }
   gnutls_x509_crt_set_key_purpose_oid(crt, GNUTLS_KP_TLS_WWW_SERVER, 0);
-  gnutls_x509_crt_set_key_usage(crt, GNUTLS_KEY_KEY_ENCIPHERMENT);
+  gnutls_x509_crt_set_key_usage(crt, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT);
   gnutls_x509_crt_set_version(crt, 3);
 
   bytes = sizeof(buffer);
@@ -378,8 +398,8 @@ httpCredentialsAreValidForName(
 
     if (result)
     {
-      int		i,		/* Looping var */
-			count;		/* Number of revoked certificates */
+      gnutls_x509_crl_iter_t iter = NULL;
+					/* Iterator */
       unsigned char	cserial[1024],	/* Certificate serial number */
 			rserial[1024];	/* Revoked serial number */
       size_t		cserial_size,	/* Size of cert serial number */
@@ -387,22 +407,24 @@ httpCredentialsAreValidForName(
 
       _cupsMutexLock(&tls_mutex);
 
-      count = gnutls_x509_crl_get_crt_count(tls_crl);
-
-      if (count > 0)
+      if (gnutls_x509_crl_get_crt_count(tls_crl) > 0)
       {
         cserial_size = sizeof(cserial);
         gnutls_x509_crt_get_serial(cert, cserial, &cserial_size);
 
-        for (i = 0; i < count; i ++)
-	{
-	  rserial_size = sizeof(rserial);
-          if (!gnutls_x509_crl_get_crt_serial(tls_crl, (unsigned)i, rserial, &rserial_size, NULL) && cserial_size == rserial_size && !memcmp(cserial, rserial, rserial_size))
+	rserial_size = sizeof(rserial);
+
+        while (!gnutls_x509_crl_iter_crt_serial(tls_crl, &iter, rserial, &rserial_size, NULL))
+        {
+          if (cserial_size == rserial_size && !memcmp(cserial, rserial, rserial_size))
 	  {
 	    result = 0;
 	    break;
 	  }
+
+	  rserial_size = sizeof(rserial);
 	}
+	gnutls_x509_crl_iter_deinit(iter);
       }
 
       _cupsMutexUnlock(&tls_mutex);
@@ -643,25 +665,31 @@ httpCredentialsString(
   if ((first = (http_credential_t *)cupsArrayFirst(credentials)) != NULL &&
       (cert = http_gnutls_create_credential(first)) != NULL)
   {
-    char		name[256];	/* Common name associated with cert */
-    size_t		namelen;	/* Length of name */
+    char		name[256],	/* Common name associated with cert */
+			issuer[256];	/* Issuer associated with cert */
+    size_t		len;		/* Length of string */
     time_t		expiration;	/* Expiration date of cert */
-    _cups_md5_state_t	md5_state;	/* MD5 state */
+    int			sigalg;	/* Signature algorithm */
     unsigned char	md5_digest[16];	/* MD5 result */
 
-    namelen = sizeof(name) - 1;
-    if (gnutls_x509_crt_get_dn_by_oid(cert, GNUTLS_OID_X520_COMMON_NAME, 0, 0, name, &namelen) >= 0)
-      name[namelen] = '\0';
+    len = sizeof(name) - 1;
+    if (gnutls_x509_crt_get_dn_by_oid(cert, GNUTLS_OID_X520_COMMON_NAME, 0, 0, name, &len) >= 0)
+      name[len] = '\0';
     else
       strlcpy(name, "unknown", sizeof(name));
 
+    len = sizeof(issuer) - 1;
+    if (gnutls_x509_crt_get_issuer_dn_by_oid(cert, GNUTLS_OID_X520_ORGANIZATION_NAME, 0, 0, issuer, &len) >= 0)
+      issuer[len] = '\0';
+    else
+      strlcpy(issuer, "unknown", sizeof(issuer));
+
     expiration = gnutls_x509_crt_get_expiration_time(cert);
+    sigalg     = gnutls_x509_crt_get_signature_algorithm(cert);
 
-    _cupsMD5Init(&md5_state);
-    _cupsMD5Append(&md5_state, first->data, (int)first->datalen);
-    _cupsMD5Finish(&md5_state, md5_digest);
+    cupsHashData("md5", first->data, first->datalen, md5_digest, sizeof(md5_digest));
 
-    snprintf(buffer, bufsize, "%s / %s / %02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X", name, httpGetDateString(expiration), md5_digest[0], md5_digest[1], md5_digest[2], md5_digest[3], md5_digest[4], md5_digest[5], md5_digest[6], md5_digest[7], md5_digest[8], md5_digest[9], md5_digest[10], md5_digest[11], md5_digest[12], md5_digest[13], md5_digest[14], md5_digest[15]);
+    snprintf(buffer, bufsize, "%s (issued by %s) / %s / %s / %02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X", name, issuer, httpGetDateString(expiration), gnutls_sign_get_name((gnutls_sign_algorithm_t)sigalg), md5_digest[0], md5_digest[1], md5_digest[2], md5_digest[3], md5_digest[4], md5_digest[5], md5_digest[6], md5_digest[7], md5_digest[8], md5_digest[9], md5_digest[10], md5_digest[11], md5_digest[12], md5_digest[13], md5_digest[14], md5_digest[15]);
 
     gnutls_x509_crt_deinit(cert);
   }
@@ -1094,7 +1122,7 @@ http_gnutls_read(
 
   http = (http_t *)ptr;
 
-  if (!http->blocking)
+  if (!http->blocking || http->timeout_value > 0.0)
   {
    /*
     * Make sure we have data before we read...
@@ -1207,26 +1235,20 @@ _httpTLSRead(http_t *http,		/* I - Connection to server */
 
 
 /*
- * '_httpTLSSetCredentials()' - Set the TLS credentials.
- */
-
-int					/* O - Status of connection */
-_httpTLSSetCredentials(http_t *http)	/* I - Connection to server */
-{
-  (void)http;
-
-  return (0);
-}
-
-
-/*
  * '_httpTLSSetOptions()' - Set TLS protocol and cipher suite options.
  */
 
 void
-_httpTLSSetOptions(int options)		/* I - Options */
+_httpTLSSetOptions(int options,		/* I - Options */
+                   int min_version,	/* I - Minimum TLS version */
+                   int max_version)	/* I - Maximum TLS version */
 {
-  tls_options = options;
+  if (!(options & _HTTP_TLS_SET_DEFAULT) || tls_options < 0)
+  {
+    tls_options     = options;
+    tls_min_version = min_version;
+    tls_max_version = max_version;
+  }
 }
 
 
@@ -1242,8 +1264,21 @@ _httpTLSStart(http_t *http)		/* I - Connection to server */
   int			status;		/* Status of handshake */
   gnutls_certificate_credentials_t *credentials;
 					/* TLS credentials */
-  char			priority_string[1024];
+  char			priority_string[2048];
 					/* Priority string */
+  int			version;	/* Current version */
+  double		old_timeout;	/* Old timeout value */
+  http_timeout_cb_t	old_cb;		/* Old timeout callback */
+  void			*old_data;	/* Old timeout data */
+  static const char * const versions[] =/* SSL/TLS versions */
+  {
+    "VERS-SSL3.0",
+    "VERS-TLS1.0",
+    "VERS-TLS1.1",
+    "VERS-TLS1.2",
+    "VERS-TLS1.3",
+    "VERS-TLS-ALL"
+  };
 
 
   DEBUG_printf(("3_httpTLSStart(http=%p)", http));
@@ -1333,7 +1368,7 @@ _httpTLSStart(http_t *http)		/* I - Connection to server */
 		keyfile[1024];		/* Private key file */
     int		have_creds = 0;		/* Have credentials? */
 
-    if (http->fields[HTTP_FIELD_HOST][0])
+    if (http->fields[HTTP_FIELD_HOST])
     {
      /*
       * Use hostname for TLS upgrade...
@@ -1505,21 +1540,50 @@ _httpTLSStart(http_t *http)		/* I - Connection to server */
 
   strlcpy(priority_string, "NORMAL", sizeof(priority_string));
 
-  if (tls_options & _HTTP_TLS_DENY_TLS10)
-    strlcat(priority_string, ":+VERS-TLS-ALL:-VERS-TLS1.0:-VERS-SSL3.0", sizeof(priority_string));
-  else if (tls_options & _HTTP_TLS_ALLOW_SSL3)
-    strlcat(priority_string, ":+VERS-TLS-ALL", sizeof(priority_string));
+  if (tls_max_version < _HTTP_TLS_MAX)
+  {
+   /*
+    * Require specific TLS versions...
+    */
+
+    strlcat(priority_string, ":-VERS-TLS-ALL", sizeof(priority_string));
+    for (version = tls_min_version; version <= tls_max_version; version ++)
+    {
+      strlcat(priority_string, ":+", sizeof(priority_string));
+      strlcat(priority_string, versions[version], sizeof(priority_string));
+    }
+  }
+  else if (tls_min_version == _HTTP_TLS_SSL3)
+  {
+   /*
+    * Allow all versions of TLS and SSL/3.0...
+    */
+
+    strlcat(priority_string, ":+VERS-TLS-ALL:+VERS-SSL3.0", sizeof(priority_string));
+  }
   else
-    strlcat(priority_string, ":+VERS-TLS-ALL:-VERS-SSL3.0", sizeof(priority_string));
+  {
+   /*
+    * Require a minimum version...
+    */
 
-  if (!(tls_options & _HTTP_TLS_ALLOW_RC4))
-    strlcat(priority_string, ":-ARCFOUR-128", sizeof(priority_string));
+    strlcat(priority_string, ":+VERS-TLS-ALL", sizeof(priority_string));
+    for (version = 0; version < tls_min_version; version ++)
+    {
+      strlcat(priority_string, ":-", sizeof(priority_string));
+      strlcat(priority_string, versions[version], sizeof(priority_string));
+    }
+  }
 
-  if (!(tls_options & _HTTP_TLS_ALLOW_DH))
-    strlcat(priority_string, ":!ANON-DH", sizeof(priority_string));
+  if (tls_options & _HTTP_TLS_ALLOW_RC4)
+    strlcat(priority_string, ":+ARCFOUR-128", sizeof(priority_string));
+  else
+    strlcat(priority_string, ":!ARCFOUR-128", sizeof(priority_string));
 
-  if (!(tls_options & _HTTP_TLS_DENY_CBC))
-    strlcat(priority_string, ":!CBC", sizeof(priority_string));
+  strlcat(priority_string, ":!ANON-DH", sizeof(priority_string));
+
+  if (tls_options & _HTTP_TLS_DENY_CBC)
+    strlcat(priority_string, ":!AES-128-CBC:!AES-256-CBC:!CAMELLIA-128-CBC:!CAMELLIA-256-CBC:!3DES-CBC", sizeof(priority_string));
 
 #ifdef HAVE_GNUTLS_PRIORITY_SET_DIRECT
   gnutls_priority_set_direct(http->tls, priority_string, NULL);
@@ -1539,6 +1603,24 @@ _httpTLSStart(http_t *http)		/* I - Connection to server */
 #endif /* HAVE_GNUTLS_TRANSPORT_SET_PULL_TIMEOUT_FUNCTION */
   gnutls_transport_set_push_function(http->tls, http_gnutls_write);
 
+ /*
+  * Enforce a minimum timeout of 10 seconds for the TLS handshake...
+  */
+
+  old_timeout  = http->timeout_value;
+  old_cb       = http->timeout_cb;
+  old_data     = http->timeout_data;
+
+  if (!old_cb || old_timeout < 10.0)
+  {
+    DEBUG_puts("4_httpTLSStart: Setting timeout to 10 seconds.");
+    httpSetTimeout(http, 10.0, NULL, NULL);
+  }
+
+ /*
+  * Do the TLS handshake...
+  */
+
   while ((status = gnutls_handshake(http->tls)) != GNUTLS_E_SUCCESS)
   {
     DEBUG_printf(("5_httpStartTLS: gnutls_handshake returned %d (%s)",
@@ -1556,9 +1638,17 @@ _httpTLSStart(http_t *http)		/* I - Connection to server */
       free(credentials);
       http->tls = NULL;
 
+      httpSetTimeout(http, old_timeout, old_cb, old_data);
+
       return (-1);
     }
   }
+
+ /*
+  * Restore the previous timeout settings...
+  */
+
+  httpSetTimeout(http, old_timeout, old_cb, old_data);
 
   http->tls_credentials = credentials;
 
@@ -1576,9 +1666,7 @@ _httpTLSStop(http_t *http)		/* I - Connection to server */
   int	error;				/* Error code */
 
 
-  // 12/06/2018 Mopria-notice: Using GNUTLS_SHUT_RDWR causes a 30 seconds timeout 
-  // when the server does not respond with the shut down message
-  error = gnutls_bye(http->tls, GNUTLS_SHUT_WR);
+  error = gnutls_bye(http->tls, http->mode == _HTTP_MODE_CLIENT ? GNUTLS_SHUT_RDWR : GNUTLS_SHUT_WR);
   if (error != GNUTLS_E_SUCCESS)
     _cupsSetError(IPP_STATUS_ERROR_INTERNAL, gnutls_strerror(errno), 0);
 

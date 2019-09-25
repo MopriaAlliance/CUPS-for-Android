@@ -4,13 +4,7 @@
  * Copyright 2007-2017 by Apple Inc.
  * Copyright 1997-2007 by Easy Software Products.
  *
- * These coded instructions, statements, and computer programs are the
- * property of Apple Inc. and are protected by Federal copyright
- * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- * which should have been included with this file.  If this file is
- * missing or damaged, see the license at "http://www.cups.org/".
- *
- * This file is subject to the Apple OS-Developed Software exception.
+ * Licensed under Apache License v2.0.  See the file "LICENSE" for more information.
  */
 
 /*
@@ -18,6 +12,7 @@
  */
 
 #include "cups-private.h"
+#include "debug-internal.h"
 
 
 /*
@@ -79,6 +74,11 @@ cupsAddOption(const char    *name,	/* I  - Name of option */
     DEBUG_printf(("3cupsAddOption: Returning %d", num_options));
     return (num_options);
   }
+
+  if (!_cups_strcasecmp(name, "cupsPrintQuality"))
+    num_options = cupsRemoveOption("print-quality", num_options, options);
+  else if (!_cups_strcasecmp(name, "print-quality"))
+    num_options = cupsRemoveOption("cupsPrintQuality", num_options, options);
 
  /*
   * Look for an existing option with the same name...

@@ -1,17 +1,12 @@
 /* config.h.  Generated from config.h.in by configure.  */
 /*
- * "$Id: config.h.in 10776 2012-12-17 22:17:08Z mike $"
+ * Configuration file for CUPS.
  *
- *   Configuration file for CUPS.
+ * Copyright 2007-2019 by Apple Inc.
+ * Copyright 1997-2007 by Easy Software Products.
  *
- *   Copyright 2007-2017 by Apple Inc.
- *   Copyright 1997-2007 by Easy Software Products.
- *
- *   These coded instructions, statements, and computer programs are the
- *   property of Apple Inc. and are protected by Federal copyright
- *   law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- *   which should have been included with this file.  If this file is
- *   missing or damaged, see the license at "http://www.cups.org/".
+ * Licensed under Apache License v2.0.  See the file "LICENSE" for more
+ * information.
  */
 
  /* 07/22/2016 Mopria-notice: some config changes were applied directly to this generated file
@@ -27,8 +22,8 @@
  * Version of software...
  */
 
-#define CUPS_SVERSION "CUPS v2.2.3"
-#define CUPS_MINIMAL "CUPS/2.2.3"
+#define CUPS_SVERSION "CUPS v2.3"
+#define CUPS_MINIMAL "CUPS/2.3"
 
 
 /*

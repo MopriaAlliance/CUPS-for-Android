@@ -2,15 +2,9 @@
  * TLS support for CUPS on Windows using the Security Support Provider
  * Interface (SSPI).
  *
- * Copyright 2010-2015 by Apple Inc.
+ * Copyright 2010-2018 by Apple Inc.
  *
- * These coded instructions, statements, and computer programs are the
- * property of Apple Inc. and are protected by Federal copyright
- * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- * which should have been included with this file.  If this file is
- * missing or damaged, see the license at "http://www.cups.org/".
- *
- * This file is subject to the Apple OS-Developed Software exception.
+ * Licensed under Apache License v2.0.  See the file "LICENSE" for more information.
  */
 
 /**** This file is included from tls.c ****/
@@ -52,7 +46,9 @@
  * Local globals...
  */
 
-static int		tls_options = -1;/* Options for TLS connections */
+static int		tls_options = -1,/* Options for TLS connections */
+			tls_min_version = _HTTP_TLS_1_0,
+			tls_max_version = _HTTP_TLS_MAX;
 
 
 /*
@@ -190,7 +186,7 @@ httpCredentialsAreValidForName(
 
   if (cert)
   {
-    if (CertNameToStr(X509_ASN_ENCODING, &(cert->pCertInfo->Subject), CERT_SIMPLE_NAME_STR, cert_name, sizeof(cert_name)))
+    if (CertNameToStrA(X509_ASN_ENCODING, &(cert->pCertInfo->Subject), CERT_SIMPLE_NAME_STR, cert_name, sizeof(cert_name)))
     {
      /*
       * Extract common name at end...
@@ -351,7 +347,6 @@ httpCredentialsString(
     SYSTEMTIME		systime;	/* System time */
     struct tm		tm;		/* UNIX date/time */
     time_t		expiration;	/* Expiration date of cert */
-    _cups_md5_state_t	md5_state;	/* MD5 state */
     unsigned char	md5_digest[16];	/* MD5 result */
 
     FileTimeToSystemTime(&(cert->pCertInfo->NotAfter), &systime);
@@ -365,7 +360,7 @@ httpCredentialsString(
 
     expiration = mktime(&tm);
 
-    if (CertNameToStr(X509_ASN_ENCODING, &(cert->pCertInfo->Subject), CERT_SIMPLE_NAME_STR, cert_name, sizeof(cert_name)))
+    if (CertNameToStrA(X509_ASN_ENCODING, &(cert->pCertInfo->Subject), CERT_SIMPLE_NAME_STR, cert_name, sizeof(cert_name)))
     {
      /*
       * Extract common name at end...
@@ -378,9 +373,7 @@ httpCredentialsString(
     else
       strlcpy(cert_name, "unknown", sizeof(cert_name));
 
-    _cupsMD5Init(&md5_state);
-    _cupsMD5Append(&md5_state, first->data, (int)first->datalen);
-    _cupsMD5Finish(&md5_state, md5_digest);
+    cupsHashData("md5", first->data, first->datalen, md5_digest, sizeof(md5_digest));
 
     snprintf(buffer, bufsize, "%s / %s / %02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X", cert_name, httpGetDateString(expiration), md5_digest[0], md5_digest[1], md5_digest[2], md5_digest[3], md5_digest[4], md5_digest[5], md5_digest[6], md5_digest[7], md5_digest[8], md5_digest[9], md5_digest[10], md5_digest[11], md5_digest[12], md5_digest[13], md5_digest[14], md5_digest[15]);
 
@@ -474,7 +467,7 @@ httpLoadCredentials(
 
   dwSize = 0;
 
-  if (!CertStrToName(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, NULL, &dwSize, NULL))
+  if (!CertStrToNameA(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, NULL, &dwSize, NULL))
   {
     DEBUG_printf(("1httpLoadCredentials: CertStrToName failed: %s", http_sspi_strerror(error, sizeof(error), GetLastError())));
     goto cleanup;
@@ -488,7 +481,7 @@ httpLoadCredentials(
     goto cleanup;
   }
 
-  if (!CertStrToName(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, p, &dwSize, NULL))
+  if (!CertStrToNameA(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, p, &dwSize, NULL))
   {
     DEBUG_printf(("1httpLoadCredentials: CertStrToName failed: %s", http_sspi_strerror(error, sizeof(error), GetLastError())));
     goto cleanup;
@@ -597,7 +590,7 @@ httpSaveCredentials(
 
   dwSize = 0;
 
-  if (!CertStrToName(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, NULL, &dwSize, NULL))
+  if (!CertStrToNameA(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, NULL, &dwSize, NULL))
   {
     DEBUG_printf(("1httpSaveCredentials: CertStrToName failed: %s", http_sspi_strerror(error, sizeof(error), GetLastError())));
     goto cleanup;
@@ -611,7 +604,7 @@ httpSaveCredentials(
     goto cleanup;
   }
 
-  if (!CertStrToName(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, p, &dwSize, NULL))
+  if (!CertStrToNameA(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, p, &dwSize, NULL))
   {
     DEBUG_printf(("1httpSaveCredentials: CertStrToName failed: %s", http_sspi_strerror(error, sizeof(error), GetLastError())));
     goto cleanup;
@@ -911,9 +904,16 @@ _httpTLSRead(http_t *http,		/* I - HTTP connection */
  */
 
 void
-_httpTLSSetOptions(int options)		/* I - Options */
+_httpTLSSetOptions(int options,		/* I - Options */
+                   int min_version,	/* I - Minimum TLS version */
+                   int max_version)	/* I - Maximum TLS version */
 {
-  tls_options = options;
+  if (!(options & _HTTP_TLS_SET_DEFAULT) || tls_options < 0)
+  {
+    tls_options     = options;
+    tls_min_version = min_version;
+    tls_max_version = max_version;
+  }
 }
 
 
@@ -970,7 +970,7 @@ _httpTLSStart(http_t *http)		/* I - HTTP connection */
     * Server: determine hostname to use...
     */
 
-    if (http->fields[HTTP_FIELD_HOST][0])
+    if (http->fields[HTTP_FIELD_HOST])
     {
      /*
       * Use hostname for TLS upgrade...
@@ -1350,7 +1350,7 @@ http_sspi_client(http_t     *http,	/* I - Client connection */
   */
 
   dwSize = sizeof(username);
-  GetUserName(username, &dwSize);
+  GetUserNameA(username, &dwSize);
   snprintf(common_name, sizeof(common_name), "CN=%s", username);
 
   if (!http_sspi_find_credentials(http, L"ClientContainer", common_name))
@@ -1713,7 +1713,7 @@ http_sspi_find_credentials(
 
   dwSize = 0;
 
-  if (!CertStrToName(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, NULL, &dwSize, NULL))
+  if (!CertStrToNameA(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, NULL, &dwSize, NULL))
   {
     DEBUG_printf(("5http_sspi_find_credentials: CertStrToName failed: %s", http_sspi_strerror(sspi->error, sizeof(sspi->error), GetLastError())));
     ok = FALSE;
@@ -1729,7 +1729,7 @@ http_sspi_find_credentials(
     goto cleanup;
   }
 
-  if (!CertStrToName(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, p, &dwSize, NULL))
+  if (!CertStrToNameA(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, p, &dwSize, NULL))
   {
     DEBUG_printf(("5http_sspi_find_credentials: CertStrToName failed: %s", http_sspi_strerror(sspi->error, sizeof(sspi->error), GetLastError())));
     ok = FALSE;
@@ -1761,18 +1761,22 @@ http_sspi_find_credentials(
 #ifdef SP_PROT_TLS1_2_SERVER
   if (http->mode == _HTTP_MODE_SERVER)
   {
-    if (tls_options & _HTTP_TLS_DENY_TLS10)
+    if (tls_min_version > _HTTP_TLS_1_1)
+      SchannelCred.grbitEnabledProtocols = SP_PROT_TLS1_2_SERVER;
+    else if (tls_min_version > _HTTP_TLS_1_0)
       SchannelCred.grbitEnabledProtocols = SP_PROT_TLS1_2_SERVER | SP_PROT_TLS1_1_SERVER;
-    else if (tls_options & _HTTP_TLS_ALLOW_SSL3)
+    else if (tls_min_version == _HTTP_TLS_SSL3)
       SchannelCred.grbitEnabledProtocols = SP_PROT_TLS1_2_SERVER | SP_PROT_TLS1_1_SERVER | SP_PROT_TLS1_0_SERVER | SP_PROT_SSL3_SERVER;
     else
       SchannelCred.grbitEnabledProtocols = SP_PROT_TLS1_2_SERVER | SP_PROT_TLS1_1_SERVER | SP_PROT_TLS1_0_SERVER;
   }
   else
   {
-    if (tls_options & _HTTP_TLS_DENY_TLS10)
+    if (tls_min_version > _HTTP_TLS_1_1)
+      SchannelCred.grbitEnabledProtocols = SP_PROT_TLS1_2_CLIENT;
+    else if (tls_min_version > _HTTP_TLS_1_0)
       SchannelCred.grbitEnabledProtocols = SP_PROT_TLS1_2_CLIENT | SP_PROT_TLS1_1_CLIENT;
-    else if (tls_options & _HTTP_TLS_ALLOW_SSL3)
+    else if (tls_min_version == _HTTP_TLS_SSL3)
       SchannelCred.grbitEnabledProtocols = SP_PROT_TLS1_2_CLIENT | SP_PROT_TLS1_1_CLIENT | SP_PROT_TLS1_0_CLIENT | SP_PROT_SSL3_CLIENT;
     else
       SchannelCred.grbitEnabledProtocols = SP_PROT_TLS1_2_CLIENT | SP_PROT_TLS1_1_CLIENT | SP_PROT_TLS1_0_CLIENT;
@@ -1781,14 +1785,14 @@ http_sspi_find_credentials(
 #else
   if (http->mode == _HTTP_MODE_SERVER)
   {
-    if (tls_options & _HTTP_TLS_ALLOW_SSL3)
+    if (tls_min_version == _HTTP_TLS_SSL3)
       SchannelCred.grbitEnabledProtocols = SP_PROT_TLS1_SERVER | SP_PROT_SSL3_SERVER;
     else
       SchannelCred.grbitEnabledProtocols = SP_PROT_TLS1_SERVER;
   }
   else
   {
-    if (tls_options & _HTTP_TLS_ALLOW_SSL3)
+    if (tls_min_version == _HTTP_TLS_SSL3)
       SchannelCred.grbitEnabledProtocols = SP_PROT_TLS1_CLIENT | SP_PROT_SSL3_CLIENT;
     else
       SchannelCred.grbitEnabledProtocols = SP_PROT_TLS1_CLIENT;
@@ -1920,7 +1924,7 @@ http_sspi_make_credentials(
 
   dwSize = 0;
 
-  if (!CertStrToName(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, NULL, &dwSize, NULL))
+  if (!CertStrToNameA(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, NULL, &dwSize, NULL))
   {
     DEBUG_printf(("5http_sspi_make_credentials: CertStrToName failed: %s", http_sspi_strerror(sspi->error, sizeof(sspi->error), GetLastError())));
     ok = FALSE;
@@ -1936,7 +1940,7 @@ http_sspi_make_credentials(
     goto cleanup;
   }
 
-  if (!CertStrToName(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, p, &dwSize, NULL))
+  if (!CertStrToNameA(X509_ASN_ENCODING, common_name, CERT_OID_NAME_STR, NULL, p, &dwSize, NULL))
   {
     DEBUG_printf(("5http_sspi_make_credentials: CertStrToName failed: %s", http_sspi_strerror(sspi->error, sizeof(sspi->error), GetLastError())));
     ok = FALSE;
@@ -2292,7 +2296,7 @@ http_sspi_strerror(char   *buffer,	/* I - Error message buffer */
                    size_t bufsize,	/* I - Size of buffer */
                    DWORD  code)		/* I - Error code */
 {
-  if (FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, code, 0, buffer, bufsize, NULL))
+  if (FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, code, 0, buffer, bufsize, NULL))
   {
    /*
     * Strip trailing CR + LF...

@@ -1,16 +1,11 @@
 /*
  * Label printer filter for CUPS.
  *
- * Copyright 2007-2016 by Apple Inc.
- * Copyright 2001-2007 by Easy Software Products.
+ * Copyright © 2007-2019 by Apple Inc.
+ * Copyright © 2001-2007 by Easy Software Products.
  *
- * These coded instructions, statements, and computer programs are the
- * property of Apple Inc. and are protected by Federal copyright
- * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- * which should have been included with this file.  If this file is
- * missing or damaged, see the license at "http://www.cups.org/".
- *
- * This file is subject to the Apple OS-Developed Software exception.
+ * Licensed under Apache License v2.0.  See the file "LICENSE" for more
+ * information.
  */
 
 /*
@@ -305,7 +300,7 @@ StartPage(ppd_file_t         *ppd,	/* I - PPD file */
 	       header->HWResolution[1], header->cupsHeight,
 	       header->NumCopies);
 	printf("PAGE-WIDTH %u\r\n", header->cupsWidth);
-	printf("PAGE-HEIGHT %u\r\n", header->cupsWidth);
+	printf("PAGE-HEIGHT %u\r\n", header->cupsHeight);
         break;
 
     case INTELLITECH_PCL :
@@ -374,7 +369,7 @@ StartPage(ppd_file_t         *ppd,	/* I - PPD file */
 
           if (header->cupsCompression != ~0U)
 	  				/* inPrintDensity */
-	    printf("\033&d%uA", 30 * header->cupsCompression / 100 - 15);
+	    printf("\033&d%dA", 30 * header->cupsCompression / 100 - 15);
 
 	  if ((choice = ppdFindMarkedChoice(ppd, "inPrintMode")) != NULL)
 	  {
@@ -619,7 +614,14 @@ EndPage(ppd_file_t          *ppd,	/* I - PPD file */
 	*/
 
 	puts("^XZ");
+
+       /*
+        * Delete the label image...
+        */
+
+	puts("^XA");
         puts("^IDR:CUPS.GRF^FS");
+	puts("^XZ");
 
        /*
         * Cut the label as needed...

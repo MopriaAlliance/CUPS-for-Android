@@ -21,7 +21,6 @@ LOCAL_SRC_FILES:= \
 	cups/array.c \
 	cups/auth.c \
 	cups/backchannel.c \
-	cups/backend.c \
 	cups/debug.c \
 	cups/dest.c \
 	cups/dest-job.c \
@@ -31,7 +30,6 @@ LOCAL_SRC_FILES:= \
 	cups/encode.c \
 	cups/file.c \
 	cups/getdevices.c \
-	cups/getifaddrs.c \
 	cups/getputfile.c \
 	cups/globals.c \
 	cups/hash.c \
@@ -47,14 +45,10 @@ LOCAL_SRC_FILES:= \
 	cups/md5passwd.c \
 	cups/notify.c \
 	cups/options.c \
-	cups/ppd.c \
-	cups/ppd-attr.c \
-	cups/ppd-cache.c \
-	cups/ppd-conflicts.c \
-	cups/ppd-custom.c \
-	cups/ppd-mark.c \
-	cups/ppd-page.c \
 	cups/pwg-media.c \
+	cups/raster-error.c \
+	cups/raster-stream.c \
+	cups/raster-stubs.c \
 	cups/request.c \
 	cups/sidechannel.c \
 	cups/snmp.c \
@@ -66,8 +60,6 @@ LOCAL_SRC_FILES:= \
 	cups/transcode.c \
 	cups/usersys.c \
 	cups/util.c \
-	filter/error.c \
-	filter/raster.c \
 	mopria.c \
 
 disabled_src_files:= \
@@ -78,7 +70,7 @@ LOCAL_C_INCLUDES := \
 LOCAL_CFLAGS := -D_PPD_DEPRECATED= -Wno-implicit-function-declaration -Wno-empty-body
 LOCAL_MODULE := lib$(PRIV_LIB_NAME)cups
 LOCAL_MODULE_TAGS := optional
-LOCAL_LDLIBS += -lz -llog -Wl,--no-warn-shared-textrel
+LOCAL_LDLIBS += -lz -llog
 LOCAL_STATIC_LIBRARIES := libgnutls
 LOCAL_DISABLE_FATAL_LINKER_WARNINGS := true
 include $(BUILD_SHARED_LIBRARY)
