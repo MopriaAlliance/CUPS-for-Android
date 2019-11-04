@@ -1,18 +1,13 @@
 /*
  * Option marking routines for CUPS.
  *
- * Copyright 2007-2015 by Apple Inc.
- * Copyright 1997-2007 by Easy Software Products, all rights reserved.
+ * Copyright © 2007-2019 by Apple Inc.
+ * Copyright © 1997-2007 by Easy Software Products, all rights reserved.
  *
- * These coded instructions, statements, and computer programs are the
- * property of Apple Inc. and are protected by Federal copyright
- * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- * which should have been included with this file.  If this file is
- * missing or damaged, see the license at "http://www.cups.org/".
+ * Licensed under Apache License v2.0.  See the file "LICENSE" for more
+ * information.
  *
  * PostScript is a trademark of Adobe Systems, Inc.
- *
- * This file is subject to the Apple OS-Developed Software exception.
  */
 
 /*
@@ -21,6 +16,7 @@
 
 #include "cups-private.h"
 #include "ppd-private.h"
+#include "debug-internal.h"
 
 
 /*
@@ -253,6 +249,7 @@ cupsMarkOptions(
   */
 
   for (i = num_options, optptr = options; i > 0; i --, optptr ++)
+  {
     if (!_cups_strcasecmp(optptr->name, "media") ||
         !_cups_strcasecmp(optptr->name, "output-bin") ||
 	!_cups_strcasecmp(optptr->name, "output-mode") ||
@@ -341,6 +338,19 @@ cupsMarkOptions(
       ppd_mark_option(ppd, "MirrorPrint", optptr->value);
     else
       ppd_mark_option(ppd, optptr->name, optptr->value);
+  }
+
+  if (print_quality)
+  {
+    int pq = atoi(print_quality);       /* print-quaity value */
+
+    if (pq == IPP_QUALITY_DRAFT)
+      ppd_mark_option(ppd, "cupsPrintQuality", "Draft");
+    else if (pq == IPP_QUALITY_HIGH)
+      ppd_mark_option(ppd, "cupsPrintQuality", "High");
+    else
+      ppd_mark_option(ppd, "cupsPrintQuality", "Normal");
+  }
 
   ppd_debug_marked(ppd, "After...");
 
@@ -841,6 +851,9 @@ ppd_mark_option(ppd_file_t *ppd,	/* I - PPD file */
 
         switch (cparam->type)
 	{
+	  case PPD_CUSTOM_UNKNOWN :
+	      break;
+
 	  case PPD_CUSTOM_CURVE :
 	  case PPD_CUSTOM_INVCURVE :
 	  case PPD_CUSTOM_REAL :
@@ -876,9 +889,9 @@ ppd_mark_option(ppd_file_t *ppd,	/* I - PPD file */
 	  case PPD_CUSTOM_PASSWORD :
 	  case PPD_CUSTOM_STRING :
 	      if (cparam->current.custom_string)
-	        _cupsStrFree(cparam->current.custom_string);
+	        free(cparam->current.custom_string);
 
-	      cparam->current.custom_string = _cupsStrAlloc(choice + 7);
+	      cparam->current.custom_string = strdup(choice + 7);
 	      break;
 	}
       }
@@ -918,6 +931,9 @@ ppd_mark_option(ppd_file_t *ppd,	/* I - PPD file */
 
 	switch (cparam->type)
 	{
+	  case PPD_CUSTOM_UNKNOWN :
+	      break;
+
 	  case PPD_CUSTOM_CURVE :
 	  case PPD_CUSTOM_INVCURVE :
 	  case PPD_CUSTOM_REAL :
@@ -953,9 +969,9 @@ ppd_mark_option(ppd_file_t *ppd,	/* I - PPD file */
 	  case PPD_CUSTOM_PASSWORD :
 	  case PPD_CUSTOM_STRING :
 	      if (cparam->current.custom_string)
-		_cupsStrFree(cparam->current.custom_string);
+		free(cparam->current.custom_string);
 
-	      cparam->current.custom_string = _cupsStrRetain(val->value);
+	      cparam->current.custom_string = strdup(val->value);
 	      break;
 	}
       }

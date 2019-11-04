@@ -1,16 +1,10 @@
 /*
  * IPP utilities for CUPS.
  *
- * Copyright 2007-2014 by Apple Inc.
- * Copyright 1997-2007 by Easy Software Products.
+ * Copyright © 2007-2018 by Apple Inc.
+ * Copyright © 1997-2007 by Easy Software Products.
  *
- * These coded instructions, statements, and computer programs are the
- * property of Apple Inc. and are protected by Federal copyright
- * law.  Distribution and use rights are outlined in the file "LICENSE.txt"
- * which should have been included with this file.  If this file is
- * missing or damaged, see the license at "http://www.cups.org/".
- *
- * This file is subject to the Apple OS-Developed Software exception.
+ * Licensed under Apache License v2.0.  See the file "LICENSE" for more information.
  */
 
 /*
@@ -18,13 +12,14 @@
  */
 
 #include "cups-private.h"
+#include "debug-internal.h"
 #include <fcntl.h>
 #include <sys/stat.h>
-#if defined(WIN32) || defined(__EMX__)
+#if defined(_WIN32) || defined(__EMX__)
 #  include <io.h>
 #else
 #  include <unistd.h>
-#endif /* WIN32 || __EMX__ */
+#endif /* _WIN32 || __EMX__ */
 #ifndef O_BINARY
 #  define O_BINARY 0
 #endif /* O_BINARY */
@@ -131,13 +126,12 @@ cupsDoIORequest(http_t     *http,	/* I - Connection to server or @code CUPS_HTTP
   * Get the default connection as needed...
   */
 
-  if (!http)
-    if ((http = _cupsConnect()) == NULL)
-    {
-      ippDelete(request);
+  if (!http && (http = _cupsConnect()) == NULL)
+  {
+    ippDelete(request);
 
-      return (NULL);
-    }
+    return (NULL);
+  }
 
  /*
   * See if we have a file to send...
@@ -151,43 +145,39 @@ cupsDoIORequest(http_t     *http,	/* I - Connection to server or @code CUPS_HTTP
       * Can't get file information!
       */
 
-      _cupsSetError(errno == EBADF ? IPP_STATUS_ERROR_NOT_FOUND : IPP_STATUS_ERROR_NOT_AUTHORIZED,
-                    NULL, 0);
-
+      _cupsSetError(errno == EBADF ? IPP_STATUS_ERROR_NOT_FOUND : IPP_STATUS_ERROR_NOT_AUTHORIZED, NULL, 0);
       ippDelete(request);
 
       return (NULL);
     }
 
-#ifdef WIN32
+#ifdef _WIN32
     if (fileinfo.st_mode & _S_IFDIR)
 #else
     if (S_ISDIR(fileinfo.st_mode))
-#endif /* WIN32 */
+#endif /* _WIN32 */
     {
      /*
       * Can't send a directory...
       */
 
-      ippDelete(request);
-
       _cupsSetError(IPP_STATUS_ERROR_NOT_POSSIBLE, strerror(EISDIR), 0);
+      ippDelete(request);
 
       return (NULL);
     }
 
-#ifndef WIN32
+#ifndef _WIN32
     if (!S_ISREG(fileinfo.st_mode))
       length = 0;			/* Chunk when piping */
     else
-#endif /* !WIN32 */
+#endif /* !_WIN32 */
     length = ippLength(request) + (size_t)fileinfo.st_size;
   }
   else
     length = ippLength(request);
 
-  DEBUG_printf(("2cupsDoIORequest: Request length=%ld, total length=%ld",
-                (long)ippLength(request), (long)length));
+  DEBUG_printf(("2cupsDoIORequest: Request length=%ld, total length=%ld", (long)ippLength(request), (long)length));
 
  /*
   * Clear any "Local" authentication data since it is probably stale...
@@ -220,9 +210,9 @@ cupsDoIORequest(http_t     *http,	/* I - Connection to server or @code CUPS_HTTP
       * Send the file with the request...
       */
 
-#ifndef WIN32
+#ifndef _WIN32
       if (S_ISREG(fileinfo.st_mode))
-#endif /* WIN32 */
+#endif /* _WIN32 */
       lseek(infile, 0, SEEK_SET);
 
       while ((bytes = read(infile, buffer, sizeof(buffer))) > 0)
@@ -596,6 +586,8 @@ cupsSendRequest(http_t     *http,	/* I - Connection to server or @code CUPS_HTTP
   int			got_status;	/* Did we get the status? */
   ipp_state_t		state;		/* State of IPP processing */
   http_status_t		expect;		/* Expect: header to use */
+  char			date[256];	/* Date: header value */
+  int			digest;		/* Are we using Digest authentication? */
 
 
   DEBUG_printf(("cupsSendRequest(http=%p, request=%p(%s), resource=\"%s\", length=" CUPS_LLFMT ")", (void *)http, (void *)request, request ? ippOpString(request->request.op.operation_id) : "?", resource, CUPS_LLCAST length));
@@ -615,9 +607,8 @@ cupsSendRequest(http_t     *http,	/* I - Connection to server or @code CUPS_HTTP
   * Get the default connection as needed...
   */
 
-  if (!http)
-    if ((http = _cupsConnect()) == NULL)
-      return (HTTP_STATUS_SERVICE_UNAVAILABLE);
+  if (!http && (http = _cupsConnect()) == NULL)
+    return (HTTP_STATUS_SERVICE_UNAVAILABLE);
 
  /*
   * If the prior request was not flushed out, do so now...
@@ -657,7 +648,7 @@ cupsSendRequest(http_t     *http,	/* I - Connection to server or @code CUPS_HTTP
   * Reconnect if the last response had a "Connection: close"...
   */
 
-  if (!_cups_strcasecmp(http->fields[HTTP_FIELD_CONNECTION], "close"))
+  if (!_cups_strcasecmp(httpGetField(http, HTTP_FIELD_CONNECTION), "close"))
   {
     DEBUG_puts("2cupsSendRequest: Connection: close");
     httpClearFields(http);
@@ -685,7 +676,19 @@ cupsSendRequest(http_t     *http,	/* I - Connection to server or @code CUPS_HTTP
     httpClearFields(http);
     httpSetExpect(http, expect);
     httpSetField(http, HTTP_FIELD_CONTENT_TYPE, "application/ipp");
+    httpSetField(http, HTTP_FIELD_DATE, httpGetDateString2(time(NULL), date, (int)sizeof(date)));
     httpSetLength(http, length);
+
+    digest = http->authstring && !strncmp(http->authstring, "Digest ", 7);
+
+    if (digest)
+    {
+     /*
+      * Update the Digest authentication string...
+      */
+
+      _httpSetDigestAuthString(http, http->nextnonce, "POST", resource);
+    }
 
 #ifdef HAVE_GSSAPI
     if (http->authstring && !strncmp(http->authstring, "Negotiate", 9))
@@ -771,9 +774,9 @@ cupsSendRequest(http_t     *http,	/* I - Connection to server or @code CUPS_HTTP
     * Wait up to 1 second to get the 100-continue response as needed...
     */
 
-    if (!got_status)
+    if (!got_status || (digest && status == HTTP_STATUS_CONTINUE))
     {
-      if (expect == HTTP_STATUS_CONTINUE)
+      if (expect == HTTP_STATUS_CONTINUE || digest)
       {
 	DEBUG_puts("2cupsSendRequest: Waiting for 100-continue...");
 
@@ -996,7 +999,11 @@ _cupsConnect(void)
     */
 
     if (strcmp(cg->http->hostname, cg->server) ||
+#ifdef AF_LOCAL
+        (httpAddrFamily(cg->http->hostaddr) != AF_LOCAL && cg->ipp_port != httpAddrPort(cg->http->hostaddr)) ||
+#else
         cg->ipp_port != httpAddrPort(cg->http->hostaddr) ||
+#endif /* AF_LOCAL */
         (cg->http->encryption != cg->encryption &&
 	 cg->http->encryption == HTTP_ENCRYPTION_NEVER))
     {
@@ -1016,13 +1023,13 @@ _cupsConnect(void)
       char	ch;			/* Connection check byte */
       ssize_t	n;			/* Number of bytes */
 
-#ifdef WIN32
+#ifdef _WIN32
       if ((n = recv(cg->http->fd, &ch, 1, MSG_PEEK)) == 0 ||
           (n < 0 && WSAGetLastError() != WSAEWOULDBLOCK))
 #else
       if ((n = recv(cg->http->fd, &ch, 1, MSG_PEEK | MSG_DONTWAIT)) == 0 ||
           (n < 0 && errno != EWOULDBLOCK))
-#endif /* WIN32 */
+#endif /* _WIN32 */
       {
        /*
         * Nope, close the connection...
